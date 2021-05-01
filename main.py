@@ -8,6 +8,7 @@ from typing import List, Optional, Union
 
 import dotenv
 import requests
+import phonenumbers
 from backports.datetime_fromisoformat import MonkeyPatch
 from fastapi import FastAPI, Security, Query
 from fastapi.exceptions import HTTPException
@@ -172,18 +173,20 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
 
     if offset:
         params['offset'] = offset
-    print(params)
-    results = requests.get(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER, params=params).json()
+
+    response = requests.get(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER, params=params)
+    results = response.json()
 
     response_data = []
     for records in results['records']:
         fields = records['fields']
         try:
             response_data.append(Request(
-                citizen_id=fields.get('Citizen ID'),
+                citizen_id=fields.get('Citizen ID').replace("-", ""),
                 first_name=fields.get('First Name'),
                 last_name=fields.get('Last Name'),
-                phone_number=fields.get('Phone Number'),
+                phone_number=phonenumbers.format_number(phonenumbers.parse(
+                    fields.get('Phone Number'), "TH"), phonenumbers.PhoneNumberFormat.E164),
                 email=fields.get('Email'),
                 sex=fields.get('Sex'),
                 date_of_birth=fields.get(
@@ -220,7 +223,8 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 location_longitude=fields.get('Location Longitude'),
                 caretaker_first_name=fields.get('Caretaker First Name'),
                 caretaker_last_name=fields.get('Caretaker Last Name'),
-                caretaker_phone_number=fields.get('Caretaker Phone Number'),
+                caretaker_phone_number=phonenumbers.format_number(phonenumbers.parse(
+                    fields.get('Caretaker Phone Number'), "TH"), phonenumbers.PhoneNumberFormat.E164),
                 caretaker_relationship=fields.get('Caretaker Relationship'),
                 checker=fields.get('Checker', ''),
                 note=fields.get('Note', ''),
@@ -237,11 +241,11 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
     }
 
 
-@app.post("/requests")
+@ app.post("/requests")
 async def create_request(request: Request):
     pass
 
 
-@app.get("/requests/{request_id}")
+@ app.get("/requests/{request_id}")
 async def read_request():
     pass
