@@ -15,7 +15,12 @@ from fastapi.exceptions import HTTPException
 from pydantic import BaseModel
 from pydantic.error_wrappers import ValidationError
 from starlette import status
-from fastapi.security.api_key import APIKeyHeader
+from fastapi.security.api_key import APIKeyCookie, APIKeyHeader, APIKeyQuery
+from starlette.responses import JSONResponse, RedirectResponse
+from fastapi.openapi.utils import get_openapi
+from fastapi.params import Depends
+from fastapi.openapi.models import APIKey
+from fastapi.openapi.docs import get_swagger_ui_html
 
 MonkeyPatch.patch_fromisoformat()
 
@@ -33,13 +38,27 @@ if os.environ.get('BMA_API_KEY'):
 
 CHANNEL_NAME = 'BKKCOVID19CONNECT'
 
+API_KEY_NAME = 'token'
+
+api_key_query = APIKeyQuery(name=API_KEY_NAME, auto_error=False)
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+api_key_cookie = APIKeyCookie(name=API_KEY_NAME, auto_error=False)
+
+COOKIE_DOMAIN = "127.0.0.1"
+
 app = FastAPI()
 
-api_key_header_auth = APIKeyHeader(name='X-API-KEY', auto_error=True)
 
-
-async def get_api_key(api_key_header: str = Security(api_key_header_auth)):
-    if api_key_header not in TRUSTED_KEYS:
+async def get_api_key(api_key_cookie: str = Security(api_key_cookie),
+                      api_key_header: str = Security(api_key_header),
+                      api_key_query: str = Security(api_key_query)):
+    if api_key_cookie in TRUSTED_KEYS:
+        return api_key_cookie
+    elif api_key_header in TRUSTED_KEYS:
+        return api_key_header
+    elif api_key_query in TRUSTED_KEYS:
+        return api_key_query
+    else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API Key",
@@ -131,12 +150,41 @@ class Response(BaseModel):
     offset: Optional[str]
 
 
+@app.get("/openapi.json", tags=["documentation"])
+async def get_open_api_endpoint(api_key: APIKey = Depends(get_api_key)):
+    response = JSONResponse(
+        get_openapi(title='BKKCOVID19CONNECT API', version=1, routes=app.routes)
+    )
+    return response
+
+
+@app.get("/documentation", tags=["documentation"])
+async def get_documentation(api_key: APIKey = Depends(get_api_key)):
+    response = get_swagger_ui_html(openapi_url="/openapi.json", title="API docs")
+    response.set_cookie(
+        API_KEY_NAME,
+        value=api_key,
+        domain=COOKIE_DOMAIN,
+        httponly=True,
+        max_age=1800,
+        expires=1800,
+    )
+    return response
+
+
+@app.get("/logout")
+async def route_logout_and_remove_cookie():
+    response = RedirectResponse(url="/")
+    response.delete_cookie(API_KEY_NAME, domain=COOKIE_DOMAIN)
+    return response
+
+
 @app.get("/requests", response_model=Response)
 async def read_requests(last_status_change_since: Optional[datetime.datetime] = None,
                         last_status_change_until: Optional[datetime.datetime] = None,
                         status: Optional[List[RequestStatus]] = Query([RequestStatus.FINISHED]),
                         page_size: Optional[int] = 100,
-                        offset: Optional[str] = None, limit: Optional[int] = sys.maxsize):
+                        offset: Optional[str] = None, limit: Optional[int] = sys.maxsize, api_key: APIKey = Depends(get_api_key)):
 
     filter_by_formulas = []
 
