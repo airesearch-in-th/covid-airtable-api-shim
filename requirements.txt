@@ -3,7 +3,6 @@ dataclasses==0.8
 fastapi==0.63.0
 h11==0.12.0
 httptools==0.1.2
-pkg-resources==0.0.0
 pydantic==1.8.1
 python-dotenv==0.17.1
 PyYAML==5.4.1
