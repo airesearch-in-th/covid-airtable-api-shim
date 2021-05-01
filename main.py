@@ -21,6 +21,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.params import Depends
 from fastapi.openapi.models import APIKey
 from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.docs import get_redoc_html
 
 MonkeyPatch.patch_fromisoformat()
 
@@ -44,9 +45,9 @@ api_key_query = APIKeyQuery(name=API_KEY_NAME, auto_error=False)
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 api_key_cookie = APIKeyCookie(name=API_KEY_NAME, auto_error=False)
 
-COOKIE_DOMAIN = "127.0.0.1"
+COOKIE_DOMAIN = "localhost"
 
-app = FastAPI()
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 
 async def get_api_key(api_key_cookie: str = Security(api_key_cookie),
@@ -158,9 +159,29 @@ async def get_open_api_endpoint(api_key: APIKey = Depends(get_api_key)):
     return response
 
 
-@app.get("/documentation", tags=["documentation"])
+# @app.get("/secure_endpoint", tags=["test"])
+# async def get_open_api_endpoint(api_key: APIKey = Depends(get_api_key)):
+#     response = "How cool is this?"
+#     return response
+
+
+@app.get("/docs", tags=["documentation"])
 async def get_documentation(api_key: APIKey = Depends(get_api_key)):
     response = get_swagger_ui_html(openapi_url="/openapi.json", title="API docs")
+    response.set_cookie(
+        API_KEY_NAME,
+        value=api_key,
+        domain=COOKIE_DOMAIN,
+        httponly=True,
+        max_age=1800,
+        expires=1800,
+    )
+    return response
+
+
+@app.get("/redoc", tags=["documentation"])
+async def get_redoc(api_key: APIKey = Depends(get_api_key)):
+    response = get_redoc_html(openapi_url="/openapi.json", title="API docs")
     response.set_cookie(
         API_KEY_NAME,
         value=api_key,
@@ -183,7 +204,7 @@ async def route_logout_and_remove_cookie():
 async def read_requests(last_status_change_since: Optional[datetime.datetime] = None,
                         last_status_change_until: Optional[datetime.datetime] = None,
                         status: Optional[List[RequestStatus]] = Query([RequestStatus.FINISHED]),
-                        page_size: Optional[int] = 100,
+                        page_size: Optional[int] = 10000,
                         offset: Optional[str] = None, limit: Optional[int] = sys.maxsize, api_key: APIKey = Depends(get_api_key)):
 
     filter_by_formulas = []
@@ -289,11 +310,11 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
     }
 
 
-@ app.post("/requests")
-async def create_request(request: Request):
-    pass
+# @ app.post("/requests")
+# async def create_request(request: Request):
+#     pass
 
 
-@ app.get("/requests/{request_id}")
-async def read_request():
-    pass
+# @ app.get("/requests/{request_id}")
+# async def read_request():
+#     pass
