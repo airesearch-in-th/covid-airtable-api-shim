@@ -119,7 +119,7 @@ class Request(BaseModel):
     postal_code: str
     request_datetime: datetime.datetime
     channel: Channel
-    covid_test_result_image_url: Optional[HttpUrl]
+    covid_test_document_image_url: Optional[HttpUrl]
     covid_test_location_type: CovidTestLocationType
     covid_test_location_name: str
     covid_test_date: datetime.date
@@ -139,6 +139,12 @@ class Request(BaseModel):
     note: Optional[str]
     last_status_change_datetime: Optional[datetime.datetime]
 
+
+class RequestRead(Request):
+    concatenated_address: str
+    location: str
+    transfer_status: int
+
     @property
     def location(self) -> str:
         return f"{self.location_latitude},{self.location_longitude}"
@@ -146,6 +152,10 @@ class Request(BaseModel):
     @property
     def concatenated_address(self) -> str:
         return f"{self.street_address} {self.subdistrct} {self.district} {self.province} {self.postal_code}"
+
+    @property
+    def transfer_status(self) -> int:
+        return 
 
 
 class Response(BaseModel):
