@@ -3,25 +3,24 @@ import decimal
 import logging
 import os
 import sys
+import time
 from enum import Enum
 from typing import List, Optional, Union
 
 import dotenv
-import requests
 import phonenumbers
+import requests
 from backports.datetime_fromisoformat import MonkeyPatch
-from fastapi import FastAPI, Security, Query
+from fastapi import FastAPI, Query, Security
 from fastapi.exceptions import HTTPException
-from pydantic import BaseModel
-from pydantic.error_wrappers import ValidationError
-from starlette import status
-from fastapi.security.api_key import APIKeyCookie, APIKeyHeader, APIKeyQuery
-from starlette.responses import JSONResponse, RedirectResponse
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.openapi.models import APIKey
 from fastapi.openapi.utils import get_openapi
 from fastapi.params import Depends
-from fastapi.openapi.models import APIKey
-from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.openapi.docs import get_redoc_html
+from fastapi.security.api_key import APIKeyCookie, APIKeyHeader, APIKeyQuery
+from pydantic import BaseModel, EmailStr, HttpUrl, ValidationError
+from starlette import status
+from starlette.responses import JSONResponse, RedirectResponse
 
 MonkeyPatch.patch_fromisoformat()
 
@@ -95,8 +94,13 @@ class RequestStatus(str, Enum):
     UNCONTACTED = "UNCONTACTED"
     WORKING = "WORKING"
     FINISHED = "FINISHED"
-    HOSPITALIZED = "HOSPITALIZED"
     NOT_COMPATIBLE = "NOT_COMPATIBLE"
+
+
+class CareStatus(str, Enum):
+    NOT_SEEKING = "NOT_SEEKING"
+    SEEKING = "SEEKING"
+    PROVIDED = "PROVIDED"
 
 
 class Request(BaseModel):
@@ -104,11 +108,10 @@ class Request(BaseModel):
     first_name: str
     last_name: str
     phone_number: str
-    email: Optional[str]
+    email: Optional[EmailStr]
     sex: Sex
     date_of_birth: datetime.date
     status: RequestStatus
-    # concatenated_address: str
     street_address: str
     subdistrict: str
     district: str
@@ -116,19 +119,16 @@ class Request(BaseModel):
     postal_code: str
     request_datetime: datetime.datetime
     channel: Channel
-    has_covid_test_document: bool
-    covid_test_result_image_url: Optional[str]
+    covid_test_result_image_url: Optional[HttpUrl]
     covid_test_location_type: CovidTestLocationType
     covid_test_location_name: str
     covid_test_date: datetime.date
     covid_test_confirmation_date: Optional[datetime.date]
     symptoms: List[Symptom]
     other_symptoms: Optional[str]
-    # is_looking_for_care: bool
-    # is_given_care: bool
-    care_location: Optional[str]
-    care_given_on: Optional[datetime.datetime]
-    # location: str
+    care_status: CareStatus
+    care_provider_name: Optional[str]
+    last_care_status_change_datetime: Optional[datetime.datetime]
     location_latitude: decimal.Decimal
     location_longitude: decimal.Decimal
     caretaker_first_name: str
@@ -139,10 +139,12 @@ class Request(BaseModel):
     note: Optional[str]
     last_status_change_datetime: Optional[datetime.datetime]
 
-    def location(self):
+    @property
+    def location(self) -> str:
         return f"{self.location_latitude},{self.location_longitude}"
 
-    def concatenated_address(self):
+    @property
+    def concatenated_address(self) -> str:
         return f"{self.street_address} {self.subdistrct} {self.district} {self.province} {self.postal_code}"
 
 
@@ -159,15 +161,10 @@ async def get_open_api_endpoint(api_key: APIKey = Depends(get_api_key)):
     return response
 
 
-# @app.get("/secure_endpoint", tags=["test"])
-# async def get_open_api_endpoint(api_key: APIKey = Depends(get_api_key)):
-#     response = "How cool is this?"
-#     return response
-
-
 @app.get("/docs", tags=["documentation"])
 async def get_documentation(api_key: APIKey = Depends(get_api_key)):
-    response = get_swagger_ui_html(openapi_url="/openapi.json", title="API docs")
+    response = get_swagger_ui_html(
+        openapi_url="/openapi.json", title="API docs")
     response.set_cookie(
         API_KEY_NAME,
         value=api_key,
@@ -201,11 +198,10 @@ async def route_logout_and_remove_cookie():
 
 
 @app.get("/requests", response_model=Response)
-async def read_requests(last_status_change_since: Optional[datetime.datetime] = None,
-                        last_status_change_until: Optional[datetime.datetime] = None,
-                        status: Optional[List[RequestStatus]] = Query([RequestStatus.FINISHED]),
-                        page_size: Optional[int] = 10000,
-                        offset: Optional[str] = None, limit: Optional[int] = sys.maxsize, api_key: APIKey = Depends(get_api_key)):
+async def read_requests(last_status_change_since: Optional[datetime.datetime] = Query(None),
+                        last_status_change_until: Optional[datetime.datetime] = Query(None),
+                        status: Optional[List[RequestStatus]] = Query(None),
+                        api_key: APIKey = Depends(get_api_key)):
 
     filter_by_formulas = []
 
@@ -223,15 +219,14 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
         filter_by_formulas.append(
             f"DATETIME_DIFF({{Last Status Change Datetime}},DATETIME_PARSE(\"{last_status_change_until.strftime('%Y %m %d %H %M %S %z')}\",\"YYYY MM DD HH mm ss ZZ\",\"ms\")) < 0")
 
-    if len(status) > 0:
+    if status and len(status) > 0:
         status_filter_param = f"{{Status}}=\"{status[0]}\""
         for _status in status[1:]:
             status_filter_param = f"OR({status_filter_param},{{Status}}=\"{_status}\")"
         filter_by_formulas.append(status_filter_param)
 
     params = {
-        'maxRecords': limit,
-        'pageSize': page_size,
+        'pageSize': 100,
     }
 
     if len(filter_by_formulas) > 0:
@@ -240,15 +235,31 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
             filter_by_formula_param = f"AND({filter_by_formula_param},{formula})"
         params['filterByFormula'] = filter_by_formula_param
 
-    if offset:
-        params['offset'] = offset
-
-    response = requests.get(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER, params=params)
+    response = requests.get(
+        AIRTABLE_BASE_URL,
+        headers=AIRTABLE_AUTH_HEADER,
+        params=params)
     results = response.json()
-
+    records = results.get('records', [])
     response_data = []
-    for records in results['records']:
-        fields = records['fields']
+
+    while results.get('offset'):
+        time.sleep(0.8)
+        response = requests.get(
+            AIRTABLE_BASE_URL,
+            headers=AIRTABLE_AUTH_HEADER,
+            params={
+                **{'offset': results.get('offset')
+                   }
+            })
+        logging.warn(
+            f'Executing multi-page query... ' +
+            f'Currently on page {len(records) // 100}. Got {len(records)} records so far.')
+        results = response.json()
+        records += results['records']
+
+    for record in records:
+        fields = record.get('fields', [])
         try:
             response_data.append(Request(
                 citizen_id=fields.get('Citizen ID').replace("-", ""),
@@ -261,7 +272,6 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 date_of_birth=fields.get(
                     'Date of Birth') if fields.get('Date of Birth') else None,
                 status=fields.get('Status'),
-                # concatenated_address=f"{fields.get('Street Address')} {fields.get('Subdistrict')} {fields.get('District')} {fields.get('Province')} {fields.get('Postal Code')}",
                 street_address=fields.get('Street Address'),
                 subdistrict=fields.get('Subdistrict'),
                 district=fields.get('District'),
@@ -270,8 +280,6 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 request_datetime=datetime.datetime.fromisoformat(
                     f"{fields.get('Request Datetime')[:-1]}+00:00").astimezone(datetime.timezone(datetime.timedelta(hours=7))),
                 channel=CHANNEL_NAME,
-                has_covid_test_document=True if fields.get('Has Covid Test Document') and fields.get(
-                    'Has Covid Test Document') == 'มี' else False,
                 covid_test_document_image_url=fields.get('Covid Test Document Image')[0].get(
                     'url') if fields.get('Covid Test Document Image') else None,
                 covid_test_location_type=fields.get('Covid Test Location Type'),
@@ -281,13 +289,11 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 covid_test_confirmation_date=fields.get(
                     'Covid Test Confirmation Date') if fields.get('Covid Test Confirmation Date') else None,
                 symptoms=fields.get('Symptoms', []),
-                other_symptoms=fields.get('Other Symptoms', ''),
-                is_looking_for_care=fields.get('Is Looking for Care'),
-                # is_given_care=fields.get('Is Given Care'),
-                # care_location=fields.get('Care Location'),
-                # care_given_on=fields.get('Care Given on') if fields.get('Care Given on') else None,
-                # location=f"{fields.get('Location Latitude')},{fields.get('Location Longitude')}" if fields.get(
-                #     'Location Latitude') and fields.get('Location Longitude') else None,
+                other_symptoms=fields.get('Other Symptoms'),
+                care_status=fields.get('Care Status'),
+                care_provider_name=fields.get('Care Provider Name'),
+                last_care_status_change_datetime=datetime.datetime.fromisoformat(f"{fields.get('Last Care Status Change Datetime')[:-1]}+00:00").astimezone(
+                    datetime.timezone(datetime.timedelta(hours=7))) if fields.get('Last Care Status Change Datetime') else None,
                 location_latitude=fields.get('Location Latitude'),
                 location_longitude=fields.get('Location Longitude'),
                 caretaker_first_name=fields.get('Caretaker First Name'),
@@ -297,24 +303,15 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 caretaker_relationship=fields.get('Caretaker Relationship'),
                 checker=fields.get('Checker', ''),
                 note=fields.get('Note', ''),
-                last_status_change_datetime=datetime.datetime.fromisoformat(f"{fields.get('Last Status Change Datetime')[:-1]}+00:00").astimezone(datetime.timezone(datetime.timedelta(hours=7))) if fields.get(
-                    'Last Status Change Datetime') else None
+                last_status_change_datetime=datetime.datetime.fromisoformat(f"{fields.get('Last Status Change Datetime')[:-1]}+00:00").astimezone(
+                    datetime.timezone(datetime.timedelta(hours=7))) if fields.get('Last Status Change Datetime') else None
             ))
         except ValidationError as e:
-            logging.error('A record was dropped due to a Validation error', exc_info=e)
-    if len(results['records']) - len(response_data) > 0:
-        logging.warn(f"A total of {len(results['records']) - len(response_data)} was dropped due to a validation error")
+            logging.error(
+                'A record was dropped due to a Validation error', exc_info=e)
+    if len(records) - len(response_data) > 0:
+        logging.warn(
+            f"A total of {len(records) - len(response_data)} was dropped.")
     return {
-        'offset': 0 if not results.get('offset') else results.get('offset'),
         'data': response_data
     }
-
-
-# @ app.post("/requests")
-# async def create_request(request: Request):
-#     pass
-
-
-# @ app.get("/requests/{request_id}")
-# async def read_request():
-#     pass
