@@ -155,12 +155,11 @@ class RequestRead(Request):
 
     @property
     def transfer_status(self) -> int:
-        return 
+        return
 
 
 class Response(BaseModel):
     data: List[Request]
-    offset: Optional[str]
 
 
 @app.get("/openapi.json", tags=["documentation"])
