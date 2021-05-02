@@ -311,8 +311,8 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 caretaker_phone_number=phonenumbers.format_number(phonenumbers.parse(
                     fields.get('Caretaker Phone Number'), "TH"), phonenumbers.PhoneNumberFormat.E164),
                 caretaker_relationship=fields.get('Caretaker Relationship'),
-                checker=fields.get('Checker', ''),
-                note=fields.get('Note', ''),
+                checker=fields.get('Checker'),
+                note=fields.get('Note'),
                 last_status_change_datetime=datetime.datetime.fromisoformat(f"{fields.get('Last Status Change Datetime')[:-1]}+00:00").astimezone(
                     datetime.timezone(datetime.timedelta(hours=7))) if fields.get('Last Status Change Datetime') else None
             ))
