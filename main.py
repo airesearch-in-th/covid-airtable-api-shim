@@ -44,7 +44,7 @@ api_key_query = APIKeyQuery(name=API_KEY_NAME, auto_error=False)
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 api_key_cookie = APIKeyCookie(name=API_KEY_NAME, auto_error=False)
 
-COOKIE_DOMAIN = "localhost"
+COOKIE_DOMAIN = "bkkcovid19connect-api.vistec.ist"
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
