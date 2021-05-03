@@ -271,7 +271,7 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
         fields = record.get('fields', [])
         try:
             response_data.append(Request(
-                citizen_id=fields.get('Citizen ID').replace("-", ""),
+                citizen_id=fields.get('Citizen ID').replace("-", "") if fields.get('Citizen ID') else None,
                 first_name=fields.get('First Name'),
                 last_name=fields.get('Last Name'),
                 phone_number=phonenumbers.format_number(phonenumbers.parse(
@@ -318,6 +318,8 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
         except ValidationError as e:
             logging.error(
                 'A record was dropped due to a Validation error', exc_info=e)
+        except AttributeError as e:
+            logging.error('A record was dropped due to an Attribute error', exc_info=e)
     if len(records) - len(response_data) > 0:
         logging.warn(
             f"A total of {len(records) - len(response_data)} was dropped.")
