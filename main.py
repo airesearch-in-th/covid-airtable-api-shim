@@ -21,6 +21,7 @@ from fastapi.security.api_key import APIKeyCookie, APIKeyHeader, APIKeyQuery
 from pydantic import BaseModel, EmailStr, HttpUrl, ValidationError
 from starlette import status
 from starlette.responses import JSONResponse, RedirectResponse
+from phonenumbers import NumberParseException
 
 MonkeyPatch.patch_fromisoformat()
 
@@ -320,6 +321,9 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 'A record was dropped due to a Validation error', exc_info=e)
         except AttributeError as e:
             logging.error('A record was dropped due to an Attribute error', exc_info=e)
+        except NumberParseException as e:
+            logging.error('A record was dropped due to an NumberParse exception', exc_info=e)
+
     if len(records) - len(response_data) > 0:
         logging.warn(
             f"A total of {len(records) - len(response_data)} was dropped.")
