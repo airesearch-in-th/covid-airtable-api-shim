@@ -11,17 +11,18 @@ import dotenv
 import phonenumbers
 import requests
 from backports.datetime_fromisoformat import MonkeyPatch
-from fastapi import FastAPI, Query, Security
+from fastapi import FastAPI, Query, Security, Request
 from fastapi.exceptions import HTTPException
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.models import APIKey
 from fastapi.openapi.utils import get_openapi
 from fastapi.params import Depends
 from fastapi.security.api_key import APIKeyCookie, APIKeyHeader, APIKeyQuery
-from pydantic import BaseModel, EmailStr, HttpUrl, ValidationError
+from pydantic import BaseModel, EmailStr, HttpUrl, ValidationError, Field
 from starlette import status
 from starlette.responses import JSONResponse, RedirectResponse
 from phonenumbers import NumberParseException
+from pydantic.fields import Field
 
 MonkeyPatch.patch_fromisoformat()
 
@@ -44,8 +45,6 @@ API_KEY_NAME = 'token'
 api_key_query = APIKeyQuery(name=API_KEY_NAME, auto_error=False)
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 api_key_cookie = APIKeyCookie(name=API_KEY_NAME, auto_error=False)
-
-COOKIE_DOMAIN = "bkkcovid19connect-api.vistec.ist"
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -104,7 +103,7 @@ class CareStatus(str, Enum):
     PROVIDED = "PROVIDED"
 
 
-class Request(BaseModel):
+class CareRequest(BaseModel):
     citizen_id: str
     first_name: str
     last_name: str
@@ -141,7 +140,7 @@ class Request(BaseModel):
     last_status_change_datetime: Optional[datetime.datetime]
 
 
-class RequestRead(Request):
+class CareRequestRead(CareRequest):
     concatenated_address: str
     location: str
     transfer_status: int
@@ -160,7 +159,7 @@ class RequestRead(Request):
 
 
 class Response(BaseModel):
-    data: List[Request]
+    data: List[CareRequest]
 
 
 @app.get("/openapi.json", tags=["documentation"])
@@ -172,13 +171,13 @@ async def get_open_api_endpoint(api_key: APIKey = Depends(get_api_key)):
 
 
 @app.get("/docs", tags=["documentation"])
-async def get_documentation(api_key: APIKey = Depends(get_api_key)):
+async def get_documentation(api_key: APIKey = Depends(get_api_key), request: Request = Query(...)):
     response = get_swagger_ui_html(
         openapi_url="/openapi.json", title="API docs")
     response.set_cookie(
         API_KEY_NAME,
         value=api_key,
-        domain=COOKIE_DOMAIN,
+        domain=request.url.hostname,
         httponly=True,
         max_age=1800,
         expires=1800,
@@ -187,12 +186,12 @@ async def get_documentation(api_key: APIKey = Depends(get_api_key)):
 
 
 @app.get("/redoc", tags=["documentation"])
-async def get_redoc(api_key: APIKey = Depends(get_api_key)):
+async def get_redoc(api_key: APIKey = Depends(get_api_key), request: Request = Query(...)):
     response = get_redoc_html(openapi_url="/openapi.json", title="API docs")
     response.set_cookie(
         API_KEY_NAME,
         value=api_key,
-        domain=COOKIE_DOMAIN,
+        domain=request.url.hostname,
         httponly=True,
         max_age=1800,
         expires=1800,
@@ -201,9 +200,9 @@ async def get_redoc(api_key: APIKey = Depends(get_api_key)):
 
 
 @app.get("/logout")
-async def route_logout_and_remove_cookie():
+async def route_logout_and_remove_cookie(request: Request):
     response = RedirectResponse(url="/")
-    response.delete_cookie(API_KEY_NAME, domain=COOKIE_DOMAIN)
+    response.delete_cookie(API_KEY_NAME, domain=request.url.hostname)
     return response
 
 
@@ -271,7 +270,7 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
     for record in records:
         fields = record.get('fields', [])
         try:
-            response_data.append(Request(
+            response_data.append(CareRequest(
                 citizen_id=fields.get('Citizen ID').replace("-", "") if fields.get('Citizen ID') else None,
                 first_name=fields.get('First Name'),
                 last_name=fields.get('Last Name'),
