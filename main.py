@@ -111,7 +111,12 @@ class CareRequest(BaseModel):
     email: Optional[EmailStr]
     sex: Sex
     date_of_birth: datetime.date
-    status: RequestStatus
+    status: RequestStatus = Field(..., description='''
+        - UNCONTACTED: ยังไม่ได้ติดต่อ
+        - WORKING: กำลังติดต่อ
+        - FINISHED: ติดต่อและยืนยันข้อมูลเรียบร้อยแล้ว
+        - NOT_COMPATIBLE: ข้อมูลที่ไม่ใช้งาน (ข้อมูลทดสอบหรือข้อมูลเสีย)
+    ''')
     street_address: str
     subdistrict: str
     district: str
@@ -120,13 +125,23 @@ class CareRequest(BaseModel):
     request_datetime: datetime.datetime
     channel: Channel
     covid_test_document_image_url: Optional[HttpUrl]
-    covid_test_location_type: CovidTestLocationType
+    covid_test_location_type: CovidTestLocationType = Field(..., description='''
+        - PUBLIC_HEALTH_CENTER: ศูนย์บริการสาธารณสุข
+        - PROACTIVE_OR_MOBILE: ตรวจเชิงรุกหรือรถตรวจ
+        - BMA_HOSPITAL: โรงพยาบาลในสังกัดกรุงเทพมหานคร
+        - PUBLIC_HOSPITAL: โรงพยาบาลหรือหน่วยงานอื่นๆ ของรัฐบสล
+        - PRIVATE_HOSPITAL: โรงพยาบาลหรือหน่วยงานอื่นๆ ของเอกชน
+    ''')
     covid_test_location_name: str
     covid_test_date: datetime.date
     covid_test_confirmation_date: Optional[datetime.date]
     symptoms: List[Symptom]
     other_symptoms: Optional[str]
-    care_status: CareStatus
+    care_status: CareStatus = Field(..., description='''
+        - NOT_SEEKING: ไม่ต้องการเข้ารับการรักษา
+        - SEEKING: ต้องการเข้ารับการรักษา
+        - PROVIDED: เข้าถึงการรักษาแล้ว
+    ''')
     care_provider_name: Optional[str]
     last_care_status_change_datetime: Optional[datetime.datetime]
     location_latitude: decimal.Decimal
