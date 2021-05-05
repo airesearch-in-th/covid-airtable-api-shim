@@ -155,25 +155,7 @@ class CareRequest(BaseModel):
     last_status_change_datetime: Optional[datetime.datetime]
 
 
-class CareRequestRead(CareRequest):
-    concatenated_address: str
-    location: str
-    transfer_status: int
-
-    @property
-    def location(self) -> str:
-        return f"{self.location_latitude},{self.location_longitude}"
-
-    @property
-    def concatenated_address(self) -> str:
-        return f"{self.street_address} {self.subdistrct} {self.district} {self.province} {self.postal_code}"
-
-    @property
-    def transfer_status(self) -> int:
-        return
-
-
-class Response(BaseModel):
+class CareRequestResponse(BaseModel):
     data: List[CareRequest]
 
 
@@ -221,7 +203,15 @@ async def route_logout_and_remove_cookie(request: Request):
     return response
 
 
-@app.get("/requests", response_model=Response)
+def build_airtable_formula(formula: str, expressions: List[str]) -> str:
+    if len(expressions) == 0:
+        return ''
+    if len(expressions) == 1:
+        return expressions[0]
+    return f"{formula}({expressions[0]},{build_airtable_formula(formula, expressions[1:])})"
+
+
+@app.get("/requests", response_model=CareRequestResponse)
 async def read_requests(last_status_change_since: Optional[datetime.datetime] = Query(None),
                         last_status_change_until: Optional[datetime.datetime] = Query(None),
                         status: Optional[List[RequestStatus]] = Query(None),
@@ -245,26 +235,19 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
             f"DATETIME_DIFF({{Last Status Change Datetime}},DATETIME_PARSE(\"{last_status_change_until.strftime('%Y %m %d %H %M %S %z')}\",\"YYYY MM DD HH mm ss ZZ\",\"ms\")) < 0")
 
     if status and len(status) > 0:
-        status_filter_param = f"{{Status}}=\"{status[0]}\""
-        for _status in status[1:]:
-            status_filter_param = f"OR({status_filter_param},{{Status}}=\"{_status}\")"
-        filter_by_formulas.append(status_filter_param)
+        filter_by_formulas.append(build_airtable_formula('OR', list(
+            map(lambda status: f"{{Status}}=\"{status}\"", status))))
 
     if care_status and len(care_status) > 0:
-        care_status_filter_param = f"{{Care Status}}=\"{care_status[0]}\""
-        for _care_status in care_status[1:]:
-            care_status_filter_param = f"OR({care_status_filter_param},{{Care Status}}=\"{_care_status}\")"
-        filter_by_formulas.append(care_status_filter_param)
+        filter_by_formulas.append(build_airtable_formula('OR', list(
+            map(lambda care_status: f"{{Care Status}}=\"{care_status}\"", care_status))))
 
     params = {
         'pageSize': 100,
     }
 
     if len(filter_by_formulas) > 0:
-        filter_by_formula_param = f"{filter_by_formulas[0]}"
-        for formula in filter_by_formulas[1:]:
-            filter_by_formula_param = f"AND({filter_by_formula_param},{formula})"
-        params['filterByFormula'] = filter_by_formula_param
+        params['filterByFormula'] = build_airtable_formula('AND', filter_by_formulas)
 
     response = requests.get(
         AIRTABLE_BASE_URL,
@@ -351,3 +334,26 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
     return {
         'data': response_data
     }
+
+
+# class CareProvidedReport(BaseModel):
+#     citizen_id: str
+#     care_provider_name: str
+
+
+# @app.post("/care_provided_report")
+# def report_provided_care(care_provided_report: List[CareProvidedReport], api_key: APIKey = Depends(get_api_key)):
+
+#     def hyphenate_citizen_id(unhyphenated_id: str) -> str:
+#         return (f"{unhyphenated_id[0]}-{unhyphenated_id[1:5]}-{unhyphenated_id[5:10]}" +
+#                 f"-{unhyphenated_id[10:12]}-{unhyphenated_id[12]}")
+
+#     if care_provided_report:
+#         reports = [] + care_provided_report
+#         offset = 0
+#         while len(reports) > 0:
+#             working_reports = reports[:10]
+#             request = requests.patch(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER)
+
+#     else:
+#         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
