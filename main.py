@@ -1,3 +1,4 @@
+import json
 import datetime
 import decimal
 import logging
@@ -5,24 +6,24 @@ import os
 import sys
 import time
 from enum import Enum
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import dotenv
 import phonenumbers
 import requests
 from backports.datetime_fromisoformat import MonkeyPatch
-from fastapi import FastAPI, Query, Security, Request
+from fastapi import FastAPI, Query, Request, Security
 from fastapi.exceptions import HTTPException
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.models import APIKey
 from fastapi.openapi.utils import get_openapi
 from fastapi.params import Depends
 from fastapi.security.api_key import APIKeyCookie, APIKeyHeader, APIKeyQuery
-from pydantic import BaseModel, EmailStr, HttpUrl, ValidationError, Field
-from starlette import status
-from starlette.responses import JSONResponse, RedirectResponse
 from phonenumbers import NumberParseException
+from pydantic import BaseModel, EmailStr, Field, HttpUrl, ValidationError
 from pydantic.fields import Field
+from starlette import status
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 MonkeyPatch.patch_fromisoformat()
 
@@ -33,9 +34,10 @@ AIRTABLE_TABLE_NAME = "Care%20Requests"
 AIRTABLE_BASE_URL = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
 AIRTABLE_AUTH_HEADER = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
 
-TRUSTED_KEYS = []
-
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=7))
+REQUEST_DELAY = 0.5
+
+TRUSTED_KEYS = []
 
 if os.environ.get('BMA_API_KEY'):
     TRUSTED_KEYS.append(os.environ.get('BMA_API_KEY'))
@@ -205,20 +207,39 @@ async def route_logout_and_remove_cookie(request: Request):
     return response
 
 
-def build_airtable_formula(formula: str, expressions: List[str]) -> str:
+def build_airtable_formula_chain(formula: str, expressions: List[str]) -> str:
     if len(expressions) == 0:
         return ''
     if len(expressions) == 1:
         return expressions[0]
-    return f"{formula}({expressions[0]},{build_airtable_formula(formula, expressions[1:])})"
+    return f"{formula}({expressions[0]},{build_airtable_formula_chain(formula, expressions[1:])})"
 
 
-def build_airtable_datetime_expression(_datetime: datetime.datetime) -> str:
+def build_airtable_datetime_expression(_datetime: datetime.datetime, unit_specifier: str = "ms") -> str:
     # Check logic if datetime is aware from
     # https://docs.python.org/3/library/datetime.html#determining-if-an-object-is-aware-or-naive
     if _datetime.tzinfo is None or _datetime.tzinfo.utcoffset(_datetime) is None:
-        _datetime = _datetime.replace(tzinfo=datetime.timezone(datetime.timedelta(TIMEZONE)))
+        _datetime = _datetime.replace(tzinfo=TIMEZONE)
     return f"DATETIME_PARSE(\"{_datetime.strftime('%Y %m %d %H %M %S %z')}\",\"YYYY MM DD HH mm ss ZZ\",\"ms\")"
+
+
+def get_airtable_records(params) -> List:
+    response = requests.get(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER, params=params)
+    results = response.json()
+    records = results.get('records', [])
+    # Loop to handle multi-page query
+    while results.get('offset'):
+        time.sleep(REQUEST_DELAY)
+        response = requests.get(
+            AIRTABLE_BASE_URL,
+            headers=AIRTABLE_AUTH_HEADER,
+            params={'offset': results.get('offset')})
+        logging.warn(
+            f'Executing multi-page query... ' +
+            f'Currently on page {len(records) // 100}. Got {len(records)} records so far.')
+        results = response.json()
+        records += results['records']
+    return records
 
 
 @app.get("/requests", response_model=CareRequestResponse)
@@ -241,11 +262,11 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
             f"{build_airtable_datetime_expression(last_status_change_until)}) < 0")
 
     if status and len(status) > 0:
-        filter_by_formulas.append(build_airtable_formula('OR', list(
+        filter_by_formulas.append(build_airtable_formula_chain('OR', list(
             map(lambda status: f"{{Status}}=\"{status}\"", status))))
 
     if care_status and len(care_status) > 0:
-        filter_by_formulas.append(build_airtable_formula('OR', list(
+        filter_by_formulas.append(build_airtable_formula_chain('OR', list(
             map(lambda care_status: f"{{Care Status}}=\"{care_status}\"", care_status))))
 
     params = {
@@ -253,30 +274,11 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
     }
 
     if len(filter_by_formulas) > 0:
-        params['filterByFormula'] = build_airtable_formula('AND', filter_by_formulas)
+        params['filterByFormula'] = build_airtable_formula_chain('AND', filter_by_formulas)
 
-    response = requests.get(
-        AIRTABLE_BASE_URL,
-        headers=AIRTABLE_AUTH_HEADER,
-        params=params)
-    results = response.json()
-    records = results.get('records', [])
+    records = get_airtable_records(params)
+
     response_data = []
-
-    while results.get('offset'):
-        time.sleep(0.8)
-        response = requests.get(
-            AIRTABLE_BASE_URL,
-            headers=AIRTABLE_AUTH_HEADER,
-            params={
-                **{'offset': results.get('offset')
-                   }
-            })
-        logging.warn(
-            f'Executing multi-page query... ' +
-            f'Currently on page {len(records) // 100}. Got {len(records)} records so far.')
-        results = response.json()
-        records += results['records']
 
     for record in records:
         fields = record.get('fields', [])
@@ -336,30 +338,93 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
 
     if len(records) - len(response_data) > 0:
         logging.warn(
-            f"A total of {len(records) - len(response_data)} was dropped.")
+            f"A total of {len(records) - len(response_data)} was unable to be created.")
     return {
         'data': response_data
     }
 
 
-# class CareProvidedReport(BaseModel):
-#     citizen_id: str
-#     care_provider_name: str
+class CareProvidedReport(BaseModel):
+    citizen_id: str
+    care_provider_name: str
 
 
-# @app.post("/care_provided_report")
-# def report_provided_care(care_provided_report: List[CareProvidedReport], api_key: APIKey = Depends(get_api_key)):
+@app.post("/care_provided_report",
+          #   response_model={'updated_records': List[CareProvidedReport], 'not_updated_records': List[CareProvidedReport]}
+          )
+def report_provided_care(care_provided_report: List[CareProvidedReport], api_key: APIKey = Depends(get_api_key)):
 
-#     def hyphenate_citizen_id(unhyphenated_id: str) -> str:
-#         return (f"{unhyphenated_id[0]}-{unhyphenated_id[1:5]}-{unhyphenated_id[5:10]}" +
-#                 f"-{unhyphenated_id[10:12]}-{unhyphenated_id[12]}")
+    def hyphenate_citizen_id(unhyphenated_id: str) -> str:
+        return (f"{unhyphenated_id[0]}-{unhyphenated_id[1:5]}-{unhyphenated_id[5:10]}" +
+                f"-{unhyphenated_id[10:12]}-{unhyphenated_id[12]}")
 
-#     if care_provided_report:
-#         reports = [] + care_provided_report
-#         offset = 0
-#         while len(reports) > 0:
-#             working_reports = reports[:10]
-#             request = requests.patch(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER)
+    if care_provided_report:
+        reports = [] + care_provided_report
 
-#     else:
-#         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+        not_updated_records = []
+        updated_records = []
+
+        while len(reports) > 0:
+            time.sleep(REQUEST_DELAY)
+            working_reports = reports[:10]
+            reports = reports[10:]
+
+            citizen_id_filter_str = build_airtable_formula_chain('OR', list(
+                map(lambda report: f"{{Citizen ID}}=\"{hyphenate_citizen_id(report.citizen_id)}\"", working_reports)))
+            params = [
+                ('fields[]', 'Citizen ID'),
+                ('fields[]', 'Care Status'),
+                ('filterByFormula', build_airtable_formula_chain('AND', [
+                    citizen_id_filter_str,
+                    # Rejecting to update requests older than 21 days.
+                    f"DATETIME_DIFF({build_airtable_datetime_expression(datetime.datetime.now(), unit_specifier='d')}," +
+                    f"{{Request Datetime}}) > 21",
+                    # '{Status}=FINISHED'
+                ])),
+                ('sort[0][field]', 'Request Datetime'),
+                ('sort[0][direction]', 'asc'),
+            ]
+            records = get_airtable_records(params=params)
+
+            citizen_id_to_record_id_map = []
+
+            for record in records:
+                fields = record.get('fields')
+                citizen_id_to_record_id_map.append((fields.get('Citizen ID'), record.get('id')))
+
+            records_to_be_updated = []
+
+            for report in working_reports:
+                record_id = next((record_id for citizen_id, record_id in citizen_id_to_record_id_map
+                                  if citizen_id == hyphenate_citizen_id(report.citizen_id)), None)
+                if not record_id:
+                    not_updated_records.append({
+                        'citizen_id': report.citizen_id,
+                        'reason': 'CITIZEN_ID_NOT_FOUND'
+                    })
+                else:
+                    records_to_be_updated.append({
+                        'id': record_id,
+                        'fields': {
+                            'Care Status': 'PROVIDED',
+                            'Care Provider Name': report.care_provider_name
+                        }
+                    })
+                    updated_records.append({
+                        'citizen_id': report.citizen_id,
+                        'care_status': 'PROVIDED',
+                        'care_provider_name': report.care_provider_name
+                    })
+
+            response = requests.patch(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER,
+                                      json={'records': records_to_be_updated})
+
+            if response.status_code != requests.codes.OK:
+                response.raise_for_status()
+
+        return JSONResponse(content={'updated': updated_records, 'not_updated': not_updated_records},
+                            status_code=status.HTTP_200_OK if len(not_updated_records) == 0
+                            else status.HTTP_207_MULTI_STATUS)
+
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
