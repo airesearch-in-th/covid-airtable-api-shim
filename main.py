@@ -1,4 +1,3 @@
-import json
 import datetime
 import decimal
 import logging
@@ -29,7 +28,7 @@ MonkeyPatch.patch_fromisoformat()
 
 dotenv.load_dotenv()
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
-AIRTABLE_BASE_ID = "app6QQHLp7ui8gEae"
+AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID')
 AIRTABLE_TABLE_NAME = "Care%20Requests"
 AIRTABLE_BASE_URL = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
 AIRTABLE_AUTH_HEADER = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
