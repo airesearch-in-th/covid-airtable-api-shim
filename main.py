@@ -19,7 +19,8 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.params import Depends
 from fastapi.security.api_key import APIKeyCookie, APIKeyHeader, APIKeyQuery
 from phonenumbers import NumberParseException
-from pydantic import BaseModel, EmailStr, Field, HttpUrl, ValidationError
+from pydantic import (BaseModel, EmailStr, Field, HttpUrl, ValidationError,
+                      constr)
 from pydantic.fields import Field
 from starlette import status
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -344,7 +345,7 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
 
 
 class CareProvidedReport(BaseModel):
-    citizen_id: str
+    citizen_id: constr(regex=r'^\d{13}$')
     care_provider_name: str
 
 
@@ -373,7 +374,7 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
                     citizen_id_filter_str,
                     # Rejecting to update requests older than 21 days
                     f"DATETIME_DIFF({build_airtable_datetime_expression(datetime.datetime.now(), unit_specifier='d')}," +
-                    f"{{Request Datetime}}) > 21",
+                    '{Request Datetime}) > 21',
                     '{Status}="FINISHED"'
                 ])),
                 ('sort[0][field]', 'Request Datetime'),
@@ -383,6 +384,7 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
             matched_records += records
 
         records_to_be_updated = []
+        skipped_records = []
 
         for report in care_provided_report:
             citizen_id = hyphenate_citizen_id(report.citizen_id)
@@ -401,7 +403,6 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
 
         processed_count = 0
         retry_count = 0
-        skipped_records = []
         updated_records = []
 
         while processed_count < len(records_to_be_updated):
