@@ -108,7 +108,7 @@ class CareStatus(str, Enum):
 
 
 class CareRequest(BaseModel):
-    citizen_id: str
+    citizen_id: constr(regex=r'^\d{13}$')
     first_name: str
     last_name: str
     phone_number: str
@@ -125,7 +125,7 @@ class CareRequest(BaseModel):
     subdistrict: str
     district: str
     province: str
-    postal_code: str
+    postal_code: constr(regex=r'^\d{5}$')
     request_datetime: datetime.datetime
     channel: Channel
     covid_test_document_image_url: Optional[HttpUrl]
