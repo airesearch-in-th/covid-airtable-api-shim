@@ -397,7 +397,7 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
             if len(list(filter(lambda rp: rp.citizen_id == report.citizen_id, care_provided_report))) != 1:
                 skipped_reports.append(report.dict())
                 continue
-            if len(matched_records) > 0:
+            if len(id_matched_records) == 1:
                 updated_reports.append(report.dict())
             else:
                 skipped_reports.append(report.dict())
