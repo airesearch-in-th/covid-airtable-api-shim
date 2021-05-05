@@ -35,6 +35,8 @@ AIRTABLE_AUTH_HEADER = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
 
 TRUSTED_KEYS = []
 
+TIMEZONE = datetime.timezone(datetime.timedelta(hours=7))
+
 if os.environ.get('BMA_API_KEY'):
     TRUSTED_KEYS.append(os.environ.get('BMA_API_KEY'))
 
@@ -211,6 +213,14 @@ def build_airtable_formula(formula: str, expressions: List[str]) -> str:
     return f"{formula}({expressions[0]},{build_airtable_formula(formula, expressions[1:])})"
 
 
+def build_airtable_datetime_expression(_datetime: datetime.datetime) -> str:
+    # Check logic if datetime is aware from
+    # https://docs.python.org/3/library/datetime.html#determining-if-an-object-is-aware-or-naive
+    if _datetime.tzinfo is None or _datetime.tzinfo.utcoffset(_datetime) is None:
+        _datetime = _datetime.replace(tzinfo=datetime.timezone(datetime.timedelta(TIMEZONE)))
+    return f"DATETIME_PARSE(\"{_datetime.strftime('%Y %m %d %H %M %S %z')}\",\"YYYY MM DD HH mm ss ZZ\",\"ms\")"
+
+
 @app.get("/requests", response_model=CareRequestResponse)
 async def read_requests(last_status_change_since: Optional[datetime.datetime] = Query(None),
                         last_status_change_until: Optional[datetime.datetime] = Query(None),
@@ -221,18 +231,14 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
     filter_by_formulas = []
 
     if last_status_change_since:
-        if last_status_change_since.tzinfo is None or last_status_change_since.tzinfo.utcoffset(last_status_change_since) is None:
-            last_status_change_since = last_status_change_since.replace(
-                tzinfo=datetime.timezone(datetime.timedelta(hours=7)))
         filter_by_formulas.append(
-            f"DATETIME_DIFF({{Last Status Change Datetime}},DATETIME_PARSE(\"{last_status_change_since.strftime('%Y %m %d %H %M %S %z')}\",\"YYYY MM DD HH mm ss ZZ\",\"ms\")) >= 0")
+            "DATETIME_DIFF({Last Status Change Datetime}," +
+            f"{build_airtable_datetime_expression(last_status_change_since)}) >= 0")
 
     if last_status_change_until:
-        if last_status_change_until.tzinfo is None or last_status_change_until.tzinfo.utcoffset(last_status_change_until) is None:
-            last_status_change_until = last_status_change_until.replace(
-                tzinfo=datetime.timezone(datetime.timedelta(hours=7)))
         filter_by_formulas.append(
-            f"DATETIME_DIFF({{Last Status Change Datetime}},DATETIME_PARSE(\"{last_status_change_until.strftime('%Y %m %d %H %M %S %z')}\",\"YYYY MM DD HH mm ss ZZ\",\"ms\")) < 0")
+            "DATETIME_DIFF({Last Status Change Datetime}," +
+            f"{build_airtable_datetime_expression(last_status_change_until)}) < 0")
 
     if status and len(status) > 0:
         filter_by_formulas.append(build_airtable_formula('OR', list(
@@ -292,7 +298,7 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 province=fields.get('Province'),
                 postal_code=fields.get('Postal Code'),
                 request_datetime=datetime.datetime.fromisoformat(
-                    f"{fields.get('Request Datetime')[:-1]}+00:00").astimezone(datetime.timezone(datetime.timedelta(hours=7))),
+                    f"{fields.get('Request Datetime')[:-1]}+00:00").astimezone(TIMEZONE),
                 channel=CHANNEL_NAME,
                 covid_test_document_image_url=fields.get('Covid Test Document Image')[0].get(
                     'url') if fields.get('Covid Test Document Image') else None,
@@ -307,7 +313,7 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 care_status=fields.get('Care Status'),
                 care_provider_name=fields.get('Care Provider Name'),
                 last_care_status_change_datetime=datetime.datetime.fromisoformat(f"{fields.get('Last Care Status Change Datetime')[:-1]}+00:00").astimezone(
-                    datetime.timezone(datetime.timedelta(hours=7))) if fields.get('Last Care Status Change Datetime') else None,
+                    TIMEZONE) if fields.get('Last Care Status Change Datetime') else None,
                 location_latitude=fields.get('Location Latitude'),
                 location_longitude=fields.get('Location Longitude'),
                 caretaker_first_name=fields.get('Caretaker First Name'),
@@ -318,7 +324,7 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 checker=fields.get('Checker'),
                 note=fields.get('Note'),
                 last_status_change_datetime=datetime.datetime.fromisoformat(f"{fields.get('Last Status Change Datetime')[:-1]}+00:00").astimezone(
-                    datetime.timezone(datetime.timedelta(hours=7))) if fields.get('Last Status Change Datetime') else None
+                    TIMEZONE) if fields.get('Last Status Change Datetime') else None
             ))
         except ValidationError as e:
             logging.error(
