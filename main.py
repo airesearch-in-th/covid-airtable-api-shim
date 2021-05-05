@@ -152,6 +152,7 @@ class CareRequest(BaseModel):
     location_longitude: decimal.Decimal
     caretaker_first_name: str
     caretaker_last_name: str
+    caretaker_email: Optional[EmailStr]
     caretaker_phone_number: str
     caretaker_relationship: str
     checker: Optional[str]
@@ -320,6 +321,7 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 location_longitude=fields.get('Location Longitude'),
                 caretaker_first_name=fields.get('Caretaker First Name'),
                 caretaker_last_name=fields.get('Caretaker Last Name'),
+                caretaker_email=fields.get('Caretaker Email'),
                 caretaker_phone_number=phonenumbers.format_number(phonenumbers.parse(
                     fields.get('Caretaker Phone Number'), "TH"), phonenumbers.PhoneNumberFormat.E164),
                 caretaker_relationship=fields.get('Caretaker Relationship'),
