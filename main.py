@@ -374,7 +374,7 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
                     # Rejecting to update requests older than 21 days
                     f"DATETIME_DIFF({build_airtable_datetime_expression(datetime.datetime.now(), unit_specifier='d')}," +
                     f"{{Request Datetime}}) > 21",
-                    '{Status}=FINISHED'
+                    '{Status}="FINISHED"'
                 ])),
                 ('sort[0][field]', 'Request Datetime'),
                 ('sort[0][direction]', 'asc'),
