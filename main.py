@@ -384,13 +384,20 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
             matched_records += records
 
         records_to_be_updated = []
-        skipped_records = []
+        skipped_reports = []
+        updated_reports = []
 
         for report in care_provided_report:
             citizen_id = hyphenate_citizen_id(report.citizen_id)
             care_provider_name = report.care_provider_name
             id_matched_records = filter(lambda record: record.get(
                 'fields').get('Citizen ID') == citizen_id, matched_records)
+
+            if len(list(filter(lambda rp: rp.citizen_id == report.citizen_id, care_provided_report))) != 1:
+                skipped_reports.append(report.dict())
+                continue
+
+            updated_reports.append(report.dict())
 
             for record in id_matched_records:
                 records_to_be_updated.append({
@@ -403,15 +410,15 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
 
         processed_count = 0
         retry_count = 0
+        skipped_count = 0
         updated_records = []
 
         while processed_count < len(records_to_be_updated):
             time.sleep(REQUEST_DELAY)
             working_records = records_to_be_updated[processed_count:processed_count + 10]
             if retry_count > 5:
-                skipped_records += working_records
+                skipped_count += 10
                 processed_count += 10
-                continue
             response = requests.patch(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER,
                                       json={'records': working_records})
             if response.status_code == requests.codes.OK:
@@ -421,9 +428,13 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
             else:
                 retry_count += 1
 
-        return JSONResponse(content={'updated': updated_records, 'skipped': skipped_records},
-                            status_code=status.HTTP_200_OK if len(skipped_records) == 0
+        if skipped_count > 0:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail="Unable to reach backend, possible case of partial update, please retry.")
+
+        return JSONResponse(content={'skipped': skipped_reports, 'updated': updated_reports},
+                            status_code=status.HTTP_200_OK if len(skipped_reports) == 0
                             else status.HTTP_207_MULTI_STATUS)
 
     else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
