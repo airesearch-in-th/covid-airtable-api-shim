@@ -370,6 +370,7 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
             params = [
                 ('fields[]', 'Citizen ID'),
                 ('fields[]', 'Care Status'),
+                ('fields[]', 'Note'),
                 ('filterByFormula', build_airtable_formula_chain('AND', [
                     citizen_id_filter_str,
                     # Rejecting to update requests older than 21 days
@@ -390,21 +391,25 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
         for report in care_provided_report:
             citizen_id = hyphenate_citizen_id(report.citizen_id)
             care_provider_name = report.care_provider_name
-            id_matched_records = filter(lambda record: record.get(
-                'fields').get('Citizen ID') == citizen_id, matched_records)
+            id_matched_records = list(filter(lambda record: record.get(
+                'fields').get('Citizen ID') == citizen_id, matched_records))
 
             if len(list(filter(lambda rp: rp.citizen_id == report.citizen_id, care_provided_report))) != 1:
                 skipped_reports.append(report.dict())
                 continue
-
-            updated_reports.append(report.dict())
+            if len(matched_records) > 0:
+                updated_reports.append(report.dict())
+            else:
+                skipped_reports.append(report.dict())
 
             for record in id_matched_records:
                 records_to_be_updated.append({
                     'id': record.get('id'),
                     'fields': {
                         'Care Status': 'PROVIDED',
-                        'Care Provider Name': care_provider_name
+                        'Care Provider Name': care_provider_name,
+                        'Note': f"Update care status to PROVIDED by {care_provider_name} via API-SHIM on {datetime.datetime.now().astimezone(TIMEZONE).isoformat()}\n" +
+                                record.get('fields').get('Note', '')
                     }
                 })
 
