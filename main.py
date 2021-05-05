@@ -349,9 +349,7 @@ class CareProvidedReport(BaseModel):
     care_provider_name: str
 
 
-@app.post("/care_provided_report",
-          #   response_model={'updated_records': List[CareProvidedReport], 'not_updated_records': List[CareProvidedReport]}
-          )
+@app.post("/care_provided_report")
 def report_provided_care(care_provided_report: List[CareProvidedReport], api_key: APIKey = Depends(get_api_key)):
 
     def hyphenate_citizen_id(unhyphenated_id: str) -> str:
@@ -361,69 +359,70 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
     if care_provided_report:
         reports = [] + care_provided_report
 
-        not_updated_records = []
-        updated_records = []
+        matched_records = []
 
         while len(reports) > 0:
-            time.sleep(REQUEST_DELAY)
-            working_reports = reports[:10]
-            reports = reports[10:]
+            working_reports = reports[:100]
+            reports = reports[100:]
 
-            citizen_id_filter_str = build_airtable_formula_chain('OR', list(
-                map(lambda report: f"{{Citizen ID}}=\"{hyphenate_citizen_id(report.citizen_id)}\"", working_reports)))
+            citizen_id_filter_str = build_airtable_formula_chain('OR', list(set(
+                map(lambda report: f"{{Citizen ID}}=\"{hyphenate_citizen_id(report.citizen_id)}\"", working_reports))))
             params = [
                 ('fields[]', 'Citizen ID'),
                 ('fields[]', 'Care Status'),
                 ('filterByFormula', build_airtable_formula_chain('AND', [
                     citizen_id_filter_str,
-                    # Rejecting to update requests older than 21 days.
+                    # Rejecting to update requests older than 21 days
                     f"DATETIME_DIFF({build_airtable_datetime_expression(datetime.datetime.now(), unit_specifier='d')}," +
                     f"{{Request Datetime}}) > 21",
-                    # '{Status}=FINISHED'
+                    '{Status}=FINISHED'
                 ])),
                 ('sort[0][field]', 'Request Datetime'),
                 ('sort[0][direction]', 'asc'),
             ]
             records = get_airtable_records(params=params)
+            matched_records += records
 
-            citizen_id_to_record_id_map = []
+        records_to_be_updated = []
 
-            for record in records:
-                fields = record.get('fields')
-                citizen_id_to_record_id_map.append((fields.get('Citizen ID'), record.get('id')))
+        for report in care_provided_report:
+            citizen_id = hyphenate_citizen_id(report.citizen_id)
+            care_provider_name = report.care_provider_name
+            id_matched_records = filter(lambda record: record.get(
+                'fields').get('Citizen ID') == citizen_id, matched_records)
 
-            records_to_be_updated = []
+            for record in id_matched_records:
+                records_to_be_updated.append({
+                    'id': record.get('id'),
+                    'fields': {
+                        'Care Status': 'PROVIDED',
+                        'Care Provider Name': care_provider_name
+                    }
+                })
 
-            for report in working_reports:
-                record_id = next((record_id for citizen_id, record_id in citizen_id_to_record_id_map
-                                  if citizen_id == hyphenate_citizen_id(report.citizen_id)), None)
-                if not record_id:
-                    not_updated_records.append({
-                        'citizen_id': report.citizen_id,
-                        'reason': 'CITIZEN_ID_NOT_FOUND'
-                    })
-                else:
-                    records_to_be_updated.append({
-                        'id': record_id,
-                        'fields': {
-                            'Care Status': 'PROVIDED',
-                            'Care Provider Name': report.care_provider_name
-                        }
-                    })
-                    updated_records.append({
-                        'citizen_id': report.citizen_id,
-                        'care_status': 'PROVIDED',
-                        'care_provider_name': report.care_provider_name
-                    })
+        processed_count = 0
+        retry_count = 0
+        skipped_records = []
+        updated_records = []
 
+        while processed_count < len(records_to_be_updated):
+            time.sleep(REQUEST_DELAY)
+            working_records = records_to_be_updated[processed_count:processed_count + 10]
+            if retry_count > 5:
+                skipped_records += working_records
+                processed_count += 10
+                continue
             response = requests.patch(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER,
-                                      json={'records': records_to_be_updated})
+                                      json={'records': working_records})
+            if response.status_code == requests.codes.OK:
+                updated_records += working_records
+                processed_count += 10
+                retry_count = 0
+            else:
+                retry_count += 1
 
-            if response.status_code != requests.codes.OK:
-                response.raise_for_status()
-
-        return JSONResponse(content={'updated': updated_records, 'not_updated': not_updated_records},
-                            status_code=status.HTTP_200_OK if len(not_updated_records) == 0
+        return JSONResponse(content={'updated': updated_records, 'skipped': skipped_records},
+                            status_code=status.HTTP_200_OK if len(skipped_records) == 0
                             else status.HTTP_207_MULTI_STATUS)
 
     else:
