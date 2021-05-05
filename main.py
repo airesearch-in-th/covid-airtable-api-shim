@@ -225,6 +225,7 @@ async def route_logout_and_remove_cookie(request: Request):
 async def read_requests(last_status_change_since: Optional[datetime.datetime] = Query(None),
                         last_status_change_until: Optional[datetime.datetime] = Query(None),
                         status: Optional[List[RequestStatus]] = Query(None),
+                        care_status: Optional[List[CareStatus]] = Query(None),
                         api_key: APIKey = Depends(get_api_key)):
 
     filter_by_formulas = []
@@ -248,6 +249,12 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
         for _status in status[1:]:
             status_filter_param = f"OR({status_filter_param},{{Status}}=\"{_status}\")"
         filter_by_formulas.append(status_filter_param)
+
+    if care_status and len(care_status) > 0:
+        care_status_filter_param = f"{{Care Status}}=\"{care_status[0]}\""
+        for _care_status in care_status[1:]:
+            care_status_filter_param = f"OR({care_status_filter_param},{{Care Status}}=\"{_care_status}\")"
+        filter_by_formulas.append(care_status_filter_param)
 
     params = {
         'pageSize': 100,
