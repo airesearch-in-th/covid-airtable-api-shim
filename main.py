@@ -1,11 +1,7 @@
 import datetime
-import decimal
 import logging
-import os
-import sys
 import time
-from enum import Enum
-from typing import Dict, List, Optional, Union
+from typing import List, Optional
 
 import phonenumbers
 import requests
@@ -15,16 +11,17 @@ from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.models import APIKey
 from fastapi.openapi.utils import get_openapi
 from fastapi.params import Depends
-from pydantic import (BaseModel, EmailStr, Field, HttpUrl, ValidationError,
-                      constr)
-from pydantic.fields import Field
+from pydantic import ValidationError
 from starlette import status
-from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse
 
 from airtable import (AIRTABLE_AUTH_HEADER, AIRTABLE_BASE_URL,
                       AIRTABLE_REQUEST_DELAY,
                       build_airtable_datetime_expression,
-                      build_airtable_formula_chain, get_airtable_records)
+                      build_airtable_formula_chain, get_airtable_records,
+                      get_citizen_id_matched_airtable_records)
+from models import (CareProvidedReport, CareRequest, CareRequestResponse,
+                    CareStatus, RequestStatus)
 from security import API_KEY_NAME, get_api_key
 from utils import hyphenate_citizen_id
 
@@ -35,101 +32,6 @@ TIMEZONE = datetime.timezone(datetime.timedelta(hours=7))
 CHANNEL_NAME = 'BKKCOVID19CONNECT'
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-
-
-class Channel(str, Enum):
-    BKKCOVID19CONNECT = "BKKCOVID19CONNECT"
-
-
-class CovidTestLocationType(str, Enum):
-    PUBLIC_HEALTH_CENTER = "PUBLIC_HEALTH_CENTER"
-    PROACTIVE_OR_MOBILE = "PROACTIVE_OR_MOBILE"
-    BMA_HOSPITAL = "BMA_HOSPITAL"
-    PUBLIC_HOSPITAL = "PUBLIC_HOSPITAL"
-    PRIVATE_HOSPITAL = "PRIVATE_HOSPITAL"
-
-
-class Sex(str, Enum):
-    FEMALE = "FEMALE"
-    MALE = "MALE"
-
-
-class Symptom(str, Enum):
-    FEVER = "FEVER"
-    COUGH = "COUGH"
-    HEMOPTYSIS = "HEMOPTYSIS"
-    DYSPNEA = "DYSPNEA"
-    ORTHOPNEA = "ORTHOPNEA"
-
-
-class RequestStatus(str, Enum):
-    UNCONTACTED = "UNCONTACTED"
-    WORKING = "WORKING"
-    FINISHED = "FINISHED"
-    NOT_COMPATIBLE = "NOT_COMPATIBLE"
-
-
-class CareStatus(str, Enum):
-    NOT_SEEKING = "NOT_SEEKING"
-    SEEKING = "SEEKING"
-    PROVIDED = "PROVIDED"
-
-
-class CareRequest(BaseModel):
-    citizen_id: constr(regex=r'^\d{13}$')
-    first_name: str
-    last_name: str
-    phone_number: str
-    email: Optional[EmailStr]
-    sex: Sex
-    date_of_birth: datetime.date
-    status: RequestStatus = Field(..., description='''
-        - UNCONTACTED: ยังไม่ได้ติดต่อ
-        - WORKING: กำลังติดต่อ
-        - FINISHED: ติดต่อและยืนยันข้อมูลเรียบร้อยแล้ว
-        - NOT_COMPATIBLE: ข้อมูลที่ไม่ใช้งาน (ข้อมูลทดสอบหรือข้อมูลเสีย)
-    ''')
-    street_address: str
-    subdistrict: str
-    district: str
-    province: str
-    postal_code: constr(regex=r'^\d{5}$')
-    request_datetime: datetime.datetime
-    channel: Channel
-    covid_test_document_image_url: Optional[HttpUrl]
-    covid_test_location_type: CovidTestLocationType = Field(..., description='''
-        - PUBLIC_HEALTH_CENTER: ศูนย์บริการสาธารณสุข
-        - PROACTIVE_OR_MOBILE: ตรวจเชิงรุกหรือรถตรวจ
-        - BMA_HOSPITAL: โรงพยาบาลในสังกัดกรุงเทพมหานคร
-        - PUBLIC_HOSPITAL: โรงพยาบาลหรือหน่วยงานอื่นๆ ของรัฐบสล
-        - PRIVATE_HOSPITAL: โรงพยาบาลหรือหน่วยงานอื่นๆ ของเอกชน
-    ''')
-    covid_test_location_name: str
-    covid_test_date: datetime.date
-    covid_test_confirmation_date: Optional[datetime.date]
-    symptoms: List[Symptom]
-    other_symptoms: Optional[str]
-    care_status: CareStatus = Field(..., description='''
-        - NOT_SEEKING: ไม่ต้องการเข้ารับการรักษา
-        - SEEKING: ต้องการเข้ารับการรักษา
-        - PROVIDED: เข้าถึงการรักษาแล้ว
-    ''')
-    care_provider_name: Optional[str]
-    last_care_status_change_datetime: Optional[datetime.datetime]
-    location_latitude: decimal.Decimal
-    location_longitude: decimal.Decimal
-    caretaker_first_name: str
-    caretaker_last_name: str
-    caretaker_email: Optional[EmailStr]
-    caretaker_phone_number: str
-    caretaker_relationship: str
-    checker: Optional[str]
-    note: Optional[str]
-    last_status_change_datetime: Optional[datetime.datetime]
-
-
-class CareRequestResponse(BaseModel):
-    data: List[CareRequest]
 
 
 @app.get("/openapi.json", tags=["documentation"])
@@ -277,39 +179,6 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
     return {
         'data': response_data
     }
-
-
-class CareProvidedReport(BaseModel):
-    citizen_id: constr(regex=r'^\d{13}$')
-    care_provider_name: str
-
-
-def get_citizen_id_matched_airtable_records(citizen_ids: List[str]) -> List:
-    RECORDS_PER_REQUEST = 100
-    matched_records = []
-
-    for i in range(0, len(citizen_ids), RECORDS_PER_REQUEST):
-        citizen_id_filter_str = build_airtable_formula_chain('OR', list(set(
-            map(lambda citizen_id: f"{{Citizen ID}}=\"{hyphenate_citizen_id(citizen_id)}\"",
-                citizen_ids[i:i + RECORDS_PER_REQUEST]))))
-        params = [
-            ('fields[]', 'Citizen ID'),
-            ('fields[]', 'Care Status'),
-            ('fields[]', 'Note'),
-            ('filterByFormula', build_airtable_formula_chain('AND', [
-                citizen_id_filter_str,
-                # Rejecting to update requests older than 21 days
-                f"DATETIME_DIFF({build_airtable_datetime_expression(datetime.datetime.now(), TIMEZONE, unit_specifier='d')}," +
-                '{Request Datetime}) > 21',
-                '{Status}="FINISHED"'
-            ])),
-            ('sort[0][field]', 'Request Datetime'),
-            ('sort[0][direction]', 'asc'),
-        ]
-        records = get_airtable_records(params=params)
-        matched_records += records
-
-    return matched_records
 
 
 @app.post("/care_provided_report")

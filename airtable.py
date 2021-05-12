@@ -1,9 +1,12 @@
-import requests
-import time
 import datetime
-from typing import List
 import logging
 import os
+import time
+from typing import List
+
+import requests
+
+from utils import hyphenate_citizen_id
 
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
 AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID')
@@ -46,3 +49,31 @@ def get_airtable_records(params) -> List:
         results = response.json()
         records += results['records']
     return records
+
+
+def get_citizen_id_matched_airtable_records(citizen_ids: List[str]) -> List:
+    RECORDS_PER_REQUEST = 100
+    matched_records = []
+
+    for i in range(0, len(citizen_ids), RECORDS_PER_REQUEST):
+        citizen_id_filter_str = build_airtable_formula_chain('OR', list(set(
+            map(lambda citizen_id: f"{{Citizen ID}}=\"{hyphenate_citizen_id(citizen_id)}\"",
+                citizen_ids[i:i + RECORDS_PER_REQUEST]))))
+        params = [
+            ('fields[]', 'Citizen ID'),
+            ('fields[]', 'Care Status'),
+            ('fields[]', 'Note'),
+            ('filterByFormula', build_airtable_formula_chain('AND', [
+                citizen_id_filter_str,
+                # Rejecting to update requests older than 21 days
+                f"DATETIME_DIFF({build_airtable_datetime_expression(datetime.datetime.now().astimezone(datetime.timezone(datetime.timedelta(hours=7))), datetime.timezone(datetime.timedelta(hours=7)), unit_specifier='d')}," +
+                '{Request Datetime}) > 21',
+                '{Status}="FINISHED"'
+            ])),
+            ('sort[0][field]', 'Request Datetime'),
+            ('sort[0][direction]', 'asc'),
+        ]
+        records = get_airtable_records(params=params)
+        matched_records += records
+
+    return matched_records
