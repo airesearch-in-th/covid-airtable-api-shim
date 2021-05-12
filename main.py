@@ -220,7 +220,7 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
                                                else fields.get('Care Provider Name', '')),
                         'Note': (
                             record.get('fields').get('Note', '') +
-                            f"\n\nUpdate care status to PROVIDED by {care_provider_name} via API-SHIM on " +
+                            f"\n\nUpdated care status to PROVIDED by {care_provider_name} via API-SHIM on " +
                             f"{datetime.datetime.now().astimezone(TIMEZONE).isoformat()}"
                         )
                     }

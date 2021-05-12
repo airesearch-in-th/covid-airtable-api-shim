@@ -46,13 +46,12 @@ def poll_for_new_care_status_update():
 
     response = report_provided_care(reports)
 
-    if response.status_code == status.HTTP_207_MULTI_STATUS:
-        logging.warn(f'Partial update, skipped records:\n{json.loads(response.body)}')
-        logging.info(f'Updated {len(rows) - len(skipped_rows)} records to Airtable.')
-        raise SystemExit(207)
-    if response.status_code != status.HTTP_200_OK:
+    if response.status_code // 100 != 2:
         logging.error(f'HTTP Response is not 200: got status {response.status_code}')
         raise ConnectionError(f'HTTP Response is not 200: got status {response.status_code}')
+
+    if response.status_code == status.HTTP_207_MULTI_STATUS:
+        logging.warn(f'Partial update, skipped records:\n{json.loads(response.body)}')
     logging.warn(f'Updated {len(rows) - len(skipped_rows)} records to Airtable.')
 
 
