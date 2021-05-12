@@ -7,65 +7,34 @@ import time
 from enum import Enum
 from typing import Dict, List, Optional, Union
 
-import dotenv
 import phonenumbers
 import requests
 from backports.datetime_fromisoformat import MonkeyPatch
-from fastapi import FastAPI, Query, Request, Security
-from fastapi.exceptions import HTTPException
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.models import APIKey
 from fastapi.openapi.utils import get_openapi
 from fastapi.params import Depends
-from fastapi.security.api_key import APIKeyCookie, APIKeyHeader, APIKeyQuery
-from phonenumbers import NumberParseException
 from pydantic import (BaseModel, EmailStr, Field, HttpUrl, ValidationError,
                       constr)
 from pydantic.fields import Field
 from starlette import status
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from airtable import (AIRTABLE_AUTH_HEADER, AIRTABLE_BASE_URL, AIRTABLE_REQUEST_DELAY,
+from airtable import (AIRTABLE_AUTH_HEADER, AIRTABLE_BASE_URL,
+                      AIRTABLE_REQUEST_DELAY,
                       build_airtable_datetime_expression,
                       build_airtable_formula_chain, get_airtable_records)
+from security import API_KEY_NAME, get_api_key
 from utils import hyphenate_citizen_id
 
 MonkeyPatch.patch_fromisoformat()
 
-dotenv.load_dotenv()
-
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=7))
-
-TRUSTED_KEYS = []
-
-if os.environ.get('BMA_API_KEY'):
-    TRUSTED_KEYS.append(os.environ.get('BMA_API_KEY'))
 
 CHANNEL_NAME = 'BKKCOVID19CONNECT'
 
-API_KEY_NAME = 'token'
-
-api_key_query = APIKeyQuery(name=API_KEY_NAME, auto_error=False)
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
-api_key_cookie = APIKeyCookie(name=API_KEY_NAME, auto_error=False)
-
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-
-
-async def get_api_key(api_key_cookie: str = Security(api_key_cookie),
-                      api_key_header: str = Security(api_key_header),
-                      api_key_query: str = Security(api_key_query)):
-    if api_key_cookie in TRUSTED_KEYS:
-        return api_key_cookie
-    elif api_key_header in TRUSTED_KEYS:
-        return api_key_header
-    elif api_key_query in TRUSTED_KEYS:
-        return api_key_query
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API Key",
-        )
 
 
 class Channel(str, Enum):
@@ -299,7 +268,7 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 'A record was dropped due to a Validation error', exc_info=e)
         except AttributeError as e:
             logging.error('A record was dropped due to an Attribute error', exc_info=e)
-        except NumberParseException as e:
+        except phonenumbers.NumberParseException as e:
             logging.error('A record was dropped due to an NumberParse exception', exc_info=e)
 
     if len(records) - len(response_data) > 0:
