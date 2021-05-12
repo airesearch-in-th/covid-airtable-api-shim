@@ -5,6 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python: cron.py",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}${pathSeparator}cron.py",
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Python: FastAPI",
             "type": "python",
             "request": "launch",
