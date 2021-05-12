@@ -39,6 +39,10 @@ def build_airtable_datetime_expression(_datetime: datetime.datetime,
 
 def get_airtable_records(params) -> List:
     response = requests.get(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER, params=params)
+
+    if response.status_code != requests.codes.OK:
+        raise ConnectionError(f'Unable to retrieve data from Airtable: Error HTTP{response.status_code}.')
+
     results = response.json()
     records = results.get('records', [])
     # Loop to handle multi-page query
