@@ -25,17 +25,16 @@ from pydantic.fields import Field
 from starlette import status
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from airtable import (AIRTABLE_AUTH_HEADER, AIRTABLE_BASE_URL, REQUEST_DELAY,
+                      build_airtable_datetime_expression,
+                      build_airtable_formula_chain, get_airtable_records)
+from utils import hyphenate_citizen_id
+
 MonkeyPatch.patch_fromisoformat()
 
 dotenv.load_dotenv()
-AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
-AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID')
-AIRTABLE_TABLE_NAME = "Care%20Requests"
-AIRTABLE_BASE_URL = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
-AIRTABLE_AUTH_HEADER = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
 
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=7))
-REQUEST_DELAY = 0.5
 
 TRUSTED_KEYS = []
 
@@ -208,41 +207,6 @@ async def route_logout_and_remove_cookie(request: Request):
     return response
 
 
-def build_airtable_formula_chain(formula: str, expressions: List[str]) -> str:
-    if len(expressions) == 0:
-        return ''
-    if len(expressions) == 1:
-        return expressions[0]
-    return f"{formula}({expressions[0]},{build_airtable_formula_chain(formula, expressions[1:])})"
-
-
-def build_airtable_datetime_expression(_datetime: datetime.datetime, unit_specifier: str = "ms") -> str:
-    # Check logic if datetime is aware from
-    # https://docs.python.org/3/library/datetime.html#determining-if-an-object-is-aware-or-naive
-    if _datetime.tzinfo is None or _datetime.tzinfo.utcoffset(_datetime) is None:
-        _datetime = _datetime.replace(tzinfo=TIMEZONE)
-    return f"DATETIME_PARSE(\"{_datetime.strftime('%Y %m %d %H %M %S %z')}\",\"YYYY MM DD HH mm ss ZZ\",\"ms\")"
-
-
-def get_airtable_records(params) -> List:
-    response = requests.get(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER, params=params)
-    results = response.json()
-    records = results.get('records', [])
-    # Loop to handle multi-page query
-    while results.get('offset'):
-        time.sleep(REQUEST_DELAY)
-        response = requests.get(
-            AIRTABLE_BASE_URL,
-            headers=AIRTABLE_AUTH_HEADER,
-            params={'offset': results.get('offset')})
-        logging.warn(
-            f'Executing multi-page query... ' +
-            f'Currently on page {len(records) // 100}. Got {len(records)} records so far.')
-        results = response.json()
-        records += results['records']
-    return records
-
-
 @app.get("/requests", response_model=CareRequestResponse)
 async def read_requests(last_status_change_since: Optional[datetime.datetime] = Query(None),
                         last_status_change_until: Optional[datetime.datetime] = Query(None),
@@ -255,12 +219,12 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
     if last_status_change_since:
         filter_by_formulas.append(
             "DATETIME_DIFF({Last Status Change Datetime}," +
-            f"{build_airtable_datetime_expression(last_status_change_since)}) >= 0")
+            f"{build_airtable_datetime_expression(last_status_change_since, TIMEZONE)}) >= 0")
 
     if last_status_change_until:
         filter_by_formulas.append(
             "DATETIME_DIFF({Last Status Change Datetime}," +
-            f"{build_airtable_datetime_expression(last_status_change_until)}) < 0")
+            f"{build_airtable_datetime_expression(last_status_change_until, TIMEZONE)}) < 0")
 
     if status and len(status) > 0:
         filter_by_formulas.append(build_airtable_formula_chain('OR', list(
@@ -351,40 +315,40 @@ class CareProvidedReport(BaseModel):
     care_provider_name: str
 
 
+def get_citizen_id_matched_airtable_records(citizen_ids: List[str]) -> List:
+    RECORDS_PER_REQUEST = 100
+    matched_records = []
+
+    for i in range(0, len(citizen_ids), RECORDS_PER_REQUEST):
+        citizen_id_filter_str = build_airtable_formula_chain('OR', list(set(
+            map(lambda citizen_id: f"{{Citizen ID}}=\"{hyphenate_citizen_id(citizen_id)}\"",
+                citizen_ids[i:i + RECORDS_PER_REQUEST]))))
+        params = [
+            ('fields[]', 'Citizen ID'),
+            ('fields[]', 'Care Status'),
+            ('fields[]', 'Note'),
+            ('filterByFormula', build_airtable_formula_chain('AND', [
+                citizen_id_filter_str,
+                # Rejecting to update requests older than 21 days
+                f"DATETIME_DIFF({build_airtable_datetime_expression(datetime.datetime.now(), TIMEZONE, unit_specifier='d')}," +
+                '{Request Datetime}) > 21',
+                '{Status}="FINISHED"'
+            ])),
+            ('sort[0][field]', 'Request Datetime'),
+            ('sort[0][direction]', 'asc'),
+        ]
+        records = get_airtable_records(params=params)
+        matched_records += records
+
+    return matched_records
+
+
 @app.post("/care_provided_report")
 def report_provided_care(care_provided_report: List[CareProvidedReport], api_key: APIKey = Depends(get_api_key)):
-
-    def hyphenate_citizen_id(unhyphenated_id: str) -> str:
-        return (f"{unhyphenated_id[0]}-{unhyphenated_id[1:5]}-{unhyphenated_id[5:10]}" +
-                f"-{unhyphenated_id[10:12]}-{unhyphenated_id[12]}")
-
     if care_provided_report:
         reports = [] + care_provided_report
 
-        matched_records = []
-
-        while len(reports) > 0:
-            working_reports = reports[:100]
-            reports = reports[100:]
-
-            citizen_id_filter_str = build_airtable_formula_chain('OR', list(set(
-                map(lambda report: f"{{Citizen ID}}=\"{hyphenate_citizen_id(report.citizen_id)}\"", working_reports))))
-            params = [
-                ('fields[]', 'Citizen ID'),
-                ('fields[]', 'Care Status'),
-                ('fields[]', 'Note'),
-                ('filterByFormula', build_airtable_formula_chain('AND', [
-                    citizen_id_filter_str,
-                    # Rejecting to update requests older than 21 days
-                    f"DATETIME_DIFF({build_airtable_datetime_expression(datetime.datetime.now(), unit_specifier='d')}," +
-                    '{Request Datetime}) > 21',
-                    '{Status}="FINISHED"'
-                ])),
-                ('sort[0][field]', 'Request Datetime'),
-                ('sort[0][direction]', 'asc'),
-            ]
-            records = get_airtable_records(params=params)
-            matched_records += records
+        matched_records = get_citizen_id_matched_airtable_records([report.citizen_id for report in reports])
 
         records_to_be_updated = []
         skipped_reports = []
@@ -419,6 +383,8 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
         retry_count = 0
         skipped_count = 0
         updated_records = []
+
+        # for i in range(0, len(records_to_be_updated), 10):
 
         while processed_count < len(records_to_be_updated):
             time.sleep(REQUEST_DELAY)
