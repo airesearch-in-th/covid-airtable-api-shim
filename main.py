@@ -25,7 +25,7 @@ from pydantic.fields import Field
 from starlette import status
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from airtable import (AIRTABLE_AUTH_HEADER, AIRTABLE_BASE_URL, REQUEST_DELAY,
+from airtable import (AIRTABLE_AUTH_HEADER, AIRTABLE_BASE_URL, AIRTABLE_REQUEST_DELAY,
                       build_airtable_datetime_expression,
                       build_airtable_formula_chain, get_airtable_records)
 from utils import hyphenate_citizen_id
@@ -384,22 +384,23 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
         skipped_count = 0
         updated_records = []
 
-        # for i in range(0, len(records_to_be_updated), 10):
+        for i in range(0, len(records_to_be_updated), 10):
+            time.sleep(AIRTABLE_REQUEST_DELAY)
+            working_records = records_to_be_updated[i:i + 10]
 
-        while processed_count < len(records_to_be_updated):
-            time.sleep(REQUEST_DELAY)
-            working_records = records_to_be_updated[processed_count:processed_count + 10]
             if retry_count > 5:
-                skipped_count += 10
-                processed_count += 10
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                    detail="Unable to reach backend, possible case of partial update, please retry.")
+
             response = requests.patch(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER,
                                       json={'records': working_records})
-            if response.status_code == requests.codes.OK:
-                updated_records += working_records
-                processed_count += 10
-                retry_count = 0
-            else:
+
+            if response.status_code != requests.codes.OK:
                 retry_count += 1
+                i -= 10
+            else:
+                retry_count = 0
+                updated_records += working_records
 
         if skipped_count > 0:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
