@@ -150,7 +150,8 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 other_symptoms=fields.get('Other Symptoms'),
                 care_status=fields.get('Care Status'),
                 care_provider_name=fields.get('Care Provider Name'),
-                last_care_status_change_datetime=datetime.datetime.fromisoformat(f"{fields.get('Last Care Status Change Datetime')[:-1]}+00:00").astimezone(
+                last_care_status_change_datetime=datetime.datetime.fromisoformat(
+                    f"{fields.get('Last Care Status Change Datetime')[:-1]}+00:00").astimezone(
                     TIMEZONE) if fields.get('Last Care Status Change Datetime') else None,
                 location_latitude=fields.get('Location Latitude'),
                 location_longitude=fields.get('Location Longitude'),
@@ -162,7 +163,8 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 caretaker_relationship=fields.get('Caretaker Relationship'),
                 checker=fields.get('Checker'),
                 note=fields.get('Note'),
-                last_status_change_datetime=datetime.datetime.fromisoformat(f"{fields.get('Last Status Change Datetime')[:-1]}+00:00").astimezone(
+                last_status_change_datetime=datetime.datetime.fromisoformat(
+                    f"{fields.get('Last Status Change Datetime')[:-1]}+00:00").astimezone(
                     TIMEZONE) if fields.get('Last Status Change Datetime') else None
             ))
         except ValidationError as e:
@@ -212,7 +214,8 @@ def report_provided_care(care_provided_report: List[CareProvidedReport], api_key
                     'fields': {
                         'Care Status': 'PROVIDED',
                         'Care Provider Name': care_provider_name,
-                        'Note': f"Update care status to PROVIDED by {care_provider_name} via API-SHIM on {datetime.datetime.now().astimezone(TIMEZONE).isoformat()}\n" +
+                        'Note': f"Update care status to PROVIDED by {care_provider_name} via API-SHIM on " +
+                                f"{datetime.datetime.now().astimezone(TIMEZONE).isoformat()}\n" +
                                 record.get('fields').get('Note', '')
                     }
                 })

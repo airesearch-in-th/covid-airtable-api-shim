@@ -24,7 +24,9 @@ def build_airtable_formula_chain(formula: str, expressions: List[str]) -> str:
     return f"{formula}({expressions[0]},{build_airtable_formula_chain(formula, expressions[1:])})"
 
 
-def build_airtable_datetime_expression(_datetime: datetime.datetime, timezone: datetime.timezone, unit_specifier: str = "ms") -> str:
+def build_airtable_datetime_expression(_datetime: datetime.datetime,
+                                       timezone: datetime.timezone,
+                                       unit_specifier: str = "ms") -> str:
     # Check logic if datetime is aware from
     # https://docs.python.org/3/library/datetime.html#determining-if-an-object-is-aware-or-naive
     if _datetime.tzinfo is None or _datetime.tzinfo.utcoffset(_datetime) is None:
@@ -59,6 +61,9 @@ def get_citizen_id_matched_airtable_records(citizen_ids: List[str]) -> List:
         citizen_id_filter_str = build_airtable_formula_chain('OR', list(set(
             map(lambda citizen_id: f"{{Citizen ID}}=\"{hyphenate_citizen_id(citizen_id)}\"",
                 citizen_ids[i:i + RECORDS_PER_REQUEST]))))
+        datetime_expression = build_airtable_datetime_expression(datetime.datetime.now().astimezone(
+            datetime.timezone(datetime.timedelta(hours=7))),
+            datetime.timezone(datetime.timedelta(hours=7)), unit_specifier='d')
         params = [
             ('fields[]', 'Citizen ID'),
             ('fields[]', 'Care Status'),
@@ -66,7 +71,7 @@ def get_citizen_id_matched_airtable_records(citizen_ids: List[str]) -> List:
             ('filterByFormula', build_airtable_formula_chain('AND', [
                 citizen_id_filter_str,
                 # Rejecting to update requests older than 21 days
-                f"DATETIME_DIFF({build_airtable_datetime_expression(datetime.datetime.now().astimezone(datetime.timezone(datetime.timedelta(hours=7))), datetime.timezone(datetime.timedelta(hours=7)), unit_specifier='d')}," +
+                f"DATETIME_DIFF({datetime_expression}," +
                 '{Request Datetime}) > 21',
                 '{Status}="FINISHED"'
             ])),
