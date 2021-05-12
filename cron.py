@@ -17,7 +17,8 @@ dotenv.load_dotenv()
 CMC_API_BASE_URL = 'http://cmc.bangkok.go.th/cvformapi/api/nawaminsent'
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
 
-if __name__ == '__main__':
+
+def poll_for_new_care_status_update():
     if not CMC_API_KEY:
         raise ConnectionAbortedError('Unable to retrieve API key')
 
@@ -49,3 +50,7 @@ if __name__ == '__main__':
     if not response.status_code == status.HTTP_200_OK:
         logging.error(f'HTTP Response is not 200: got status {response.status_code}')
         raise ConnectionError(f'HTTP Response is not 200: got status {response.status_code}')
+
+
+if __name__ == '__main__':
+    poll_for_new_care_status_update()
