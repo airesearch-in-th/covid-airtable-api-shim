@@ -32,8 +32,9 @@ def poll_for_new_care_status_update():
 
     for row in rows:
         try:
-            if row.get('transfer_status') != 1:
+            if row.get('transfer_status') != '1':
                 skipped_rows.append(row)
+                continue
             reports.append(CareProvidedReport(citizen_id=row.get('citizen_id'),
                            care_provider_name=row.get('hos_name')))
         except ValidationError as e:
@@ -47,10 +48,12 @@ def poll_for_new_care_status_update():
 
     if response.status_code == status.HTTP_207_MULTI_STATUS:
         logging.warn(f'Partial update, skipped records:\n{json.loads(response.body)}')
+        logging.info(f'Updated {len(rows) - len(skipped_rows)} records to Airtable.')
         raise SystemExit(207)
-    if not response.status_code == status.HTTP_200_OK:
+    if response.status_code != status.HTTP_200_OK:
         logging.error(f'HTTP Response is not 200: got status {response.status_code}')
         raise ConnectionError(f'HTTP Response is not 200: got status {response.status_code}')
+    logging.warn(f'Updated {len(rows) - len(skipped_rows)} records to Airtable.')
 
 
 if __name__ == '__main__':

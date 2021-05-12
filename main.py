@@ -185,71 +185,75 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
 
 @app.post("/care_provided_report")
 def report_provided_care(care_provided_report: List[CareProvidedReport], api_key: APIKey = Depends(get_api_key)):
-    if care_provided_report:
-        reports = [] + care_provided_report
+    reports = [] + care_provided_report
 
-        matched_records = get_citizen_id_matched_airtable_records([report.citizen_id for report in reports])
+    matched_records = get_citizen_id_matched_airtable_records([report.citizen_id for report in reports])
 
-        records_to_be_updated = []
-        skipped_reports = []
-        updated_reports = []
+    records_to_be_updated = []
+    skipped_reports = []
+    updated_reports = []
 
-        for report in care_provided_report:
-            citizen_id = hyphenate_citizen_id(report.citizen_id)
-            care_provider_name = report.care_provider_name
-            id_matched_records = list(filter(lambda record: record.get(
-                'fields').get('Citizen ID') == citizen_id, matched_records))
+    for report in care_provided_report:
+        citizen_id = hyphenate_citizen_id(report.citizen_id)
+        care_provider_name = report.care_provider_name
+        id_matched_records = list(filter(lambda record: record.get(
+            'fields').get('Citizen ID') == citizen_id, matched_records))
 
-            if len(list(filter(lambda rp: rp.citizen_id == report.citizen_id, care_provided_report))) != 1:
-                skipped_reports.append(report.dict())
-                continue
-            if len(id_matched_records) == 1:
-                updated_reports.append(report.dict())
-            else:
-                skipped_reports.append(report.dict())
+        if len(list(filter(lambda rp: rp.citizen_id == report.citizen_id, care_provided_report))) != 1:
+            skipped_reports.append(report.dict())
+            continue
+        if len(id_matched_records) == 1:
+            updated_reports.append(report.dict())
+        else:
+            skipped_reports.append(report.dict())
 
-            for record in id_matched_records:
+        for record in id_matched_records:
+            fields = record.get('fields')
+            # Skip updating record with no changes
+            if not (fields.get('Care Status') == 'PROVIDED' and
+                    fields.get('Care Provider Name', '') == care_provider_name):
                 records_to_be_updated.append({
                     'id': record.get('id'),
                     'fields': {
                         'Care Status': 'PROVIDED',
-                        'Care Provider Name': care_provider_name,
-                        'Note': f"Update care status to PROVIDED by {care_provider_name} via API-SHIM on " +
-                                f"{datetime.datetime.now().astimezone(TIMEZONE).isoformat()}\n" +
-                                record.get('fields').get('Note', '')
+                        'Care Provider Name': (care_provider_name if care_provider_name
+                                               else fields.get('Care Provider Name', '')),
+                        'Note': (
+                            record.get('fields').get('Note', '') +
+                            f"\n\nUpdate care status to PROVIDED by {care_provider_name} via API-SHIM on " +
+                            f"{datetime.datetime.now().astimezone(TIMEZONE).isoformat()}"
+                        )
                     }
                 })
 
-        processed_count = 0
-        retry_count = 0
-        skipped_count = 0
-        updated_records = []
+    retry_count = 0
+    skipped_count = 0
+    updated_records = []
 
-        for i in range(0, len(records_to_be_updated), 10):
-            time.sleep(AIRTABLE_REQUEST_DELAY)
-            working_records = records_to_be_updated[i:i + 10]
+    for i in range(0, len(records_to_be_updated), 10):
+        time.sleep(AIRTABLE_REQUEST_DELAY)
+        working_records = records_to_be_updated[i:i + 10]
 
-            if retry_count > 5:
-                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                                    detail="Unable to reach backend, possible case of partial update, please retry.")
-
-            response = requests.patch(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER,
-                                      json={'records': working_records})
-
-            if response.status_code != requests.codes.OK:
-                retry_count += 1
-                i -= 10
-            else:
-                retry_count = 0
-                updated_records += working_records
-
-        if skipped_count > 0:
+        if retry_count > 5:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                                 detail="Unable to reach backend, possible case of partial update, please retry.")
 
-        return JSONResponse(content={'skipped': skipped_reports, 'updated': updated_reports},
-                            status_code=status.HTTP_200_OK if len(skipped_reports) == 0
-                            else status.HTTP_207_MULTI_STATUS)
+        response = requests.patch(AIRTABLE_BASE_URL, headers=AIRTABLE_AUTH_HEADER,
+                                  json={'records': working_records})
 
-    else:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if response.status_code != requests.codes.OK:
+            retry_count += 1
+            i -= 10
+        else:
+            retry_count = 0
+            updated_records += working_records
+
+    logging.info(f'{len(updated_records)} records updated on Airtable.')
+
+    if skipped_count > 0:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Unable to reach backend, possible case of partial update, please retry.")
+
+    return JSONResponse(content={'skipped': skipped_reports, 'updated': updated_reports},
+                        status_code=status.HTTP_200_OK if len(skipped_reports) == 0
+                        else status.HTTP_207_MULTI_STATUS)

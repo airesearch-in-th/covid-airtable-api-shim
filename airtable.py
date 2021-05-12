@@ -74,6 +74,7 @@ def get_citizen_id_matched_airtable_records(citizen_ids: List[str]) -> List:
         params = [
             ('fields[]', 'Citizen ID'),
             ('fields[]', 'Care Status'),
+            ('fields[]', 'Care Provider Name'),
             ('fields[]', 'Note'),
             ('filterByFormula', build_airtable_formula_chain('AND', [
                 citizen_id_filter_str,
