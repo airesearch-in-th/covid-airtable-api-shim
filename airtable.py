@@ -4,9 +4,12 @@ import os
 import time
 from typing import List
 
+import dotenv
 import requests
 
 from utils import hyphenate_citizen_id
+
+dotenv.load_dotenv()
 
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
 AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID')

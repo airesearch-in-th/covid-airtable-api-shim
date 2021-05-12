@@ -14,6 +14,7 @@ from main import (CareProvidedReport, build_airtable_datetime_expression,
                   hyphenate_citizen_id, report_provided_care)
 
 dotenv.load_dotenv()
+
 CMC_API_BASE_URL = 'http://cmc.bangkok.go.th/cvformapi/api/nawaminsent'
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
 
