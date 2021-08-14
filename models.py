@@ -83,7 +83,13 @@ class CareRequest(BaseModel):
     covid_test_location_name: str
     covid_test_date: datetime.date
     covid_test_confirmation_date: Optional[datetime.date]
-    symptoms: List[Symptom]
+    symptoms: List[Symptom] = Field(..., description='''
+        - FEVER: ไข้
+        - COUGH: ไอ
+        - HEMOPTYSIS: ไอเป็นเลือด
+        - DYSPNEA: หายใจไม่สะดวกหรือหอบเหนื่อย
+        - ORTHOPNEA: หายใจไม่สะดวกหรือหอบเหนื่อยขณะนอนราบ
+    ''')
     symptoms_level: SymptomsLevel
     other_symptoms: Optional[str]
     care_status: CareStatus = Field(..., description='''
