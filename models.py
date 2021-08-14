@@ -78,6 +78,7 @@ class CareRequest(BaseModel):
     covid_test_date: datetime.date
     covid_test_confirmation_date: Optional[datetime.date]
     symptoms: List[Symptom]
+    symptoms_level: str
     other_symptoms: Optional[str]
     care_status: CareStatus = Field(..., description='''
         - NOT_SEEKING: ไม่ต้องการเข้ารับการรักษา

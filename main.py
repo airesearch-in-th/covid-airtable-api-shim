@@ -147,6 +147,7 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                 covid_test_confirmation_date=fields.get(
                     'Covid Test Confirmation Date') if fields.get('Covid Test Confirmation Date') else None,
                 symptoms=fields.get('Symptoms', []),
+                symptoms_level=fields.get('Symptoms Level'),
                 other_symptoms=fields.get('Other Symptoms'),
                 care_status=fields.get('Care Status'),
                 care_provider_name=fields.get('Care Provider Name'),
