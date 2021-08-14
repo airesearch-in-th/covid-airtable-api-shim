@@ -1,0 +1,13 @@
+[Unit]
+Description=Gunicorn instance to serve bkkcovid19connect-api.vistec.ist
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/html/bkkcovid19connect-api.vistec.ist
+Environment="PATH=/var/www/html/bkkcovid19connect-api.vistec.ist/env/bin"
+ExecStart=/var/www/html/bkkcovid19connect-api.vistec.ist/env/bin/gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --timeout 480
+
+[Install]
+WantedBy=multi-user.target

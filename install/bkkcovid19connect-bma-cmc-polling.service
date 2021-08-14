@@ -1,0 +1,15 @@
+[Unit]
+Description=Poll BMA CMC API for Care Statuses and update backend data accordingly
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/html/bkkcovid19connect-api.vistec.ist
+Environment="PATH=/var/www/html/bkkcovid19connect-api.vistec.ist/env/bin"
+ExecStart=/var/www/html/bkkcovid19connect-api.vistec.ist/env/bin/python /var/www/html/bkkcovid19connect-api.vistec.ist/cron.py
+Restart=always
+RestartSec=1800s
+
+[Install]
+WantedBy=multi-user.target
