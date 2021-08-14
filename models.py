@@ -77,7 +77,7 @@ class CareRequest(BaseModel):
         - PUBLIC_HEALTH_CENTER: ศูนย์บริการสาธารณสุข
         - PROACTIVE_OR_MOBILE: ตรวจเชิงรุกหรือรถตรวจ
         - BMA_HOSPITAL: โรงพยาบาลในสังกัดกรุงเทพมหานคร
-        - PUBLIC_HOSPITAL: โรงพยาบาลหรือหน่วยงานอื่นๆ ของรัฐบสล
+        - PUBLIC_HOSPITAL: โรงพยาบาลหรือหน่วยงานอื่นๆ ของรัฐบาล
         - PRIVATE_HOSPITAL: โรงพยาบาลหรือหน่วยงานอื่นๆ ของเอกชน
     ''')
     covid_test_location_name: str
