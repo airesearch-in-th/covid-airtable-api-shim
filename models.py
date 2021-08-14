@@ -90,7 +90,11 @@ class CareRequest(BaseModel):
         - DYSPNEA: หายใจไม่สะดวกหรือหอบเหนื่อย
         - ORTHOPNEA: หายใจไม่สะดวกหรือหอบเหนื่อยขณะนอนราบ
     ''')
-    symptoms_level: SymptomsLevel
+    symptoms_level: SymptomsLevel = Field(..., description='''
+        - RED: สีแดง คือมีอาการ DYSPNEA หรือ ORTHOPNEA
+        - YELLOW: สีเหลือง คือมีอาการ FEVER, COUGH หรือ HEMOPTYSIS โดยที่ไม่มีอาการ DYSPNEA และ ORTHOPNEA
+        - GREEN: สีเขียว คือไม่มีอาการ FEVER, COUGH, HEMOPTYSIS, DYSPNEA และ ORTHOPNEA
+    ''')
     other_symptoms: Optional[str]
     care_status: CareStatus = Field(..., description='''
         - NOT_SEEKING: ไม่ต้องการเข้ารับการรักษา
