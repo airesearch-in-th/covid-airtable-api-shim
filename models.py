@@ -45,6 +45,12 @@ class CareStatus(str, Enum):
     PROVIDED = "PROVIDED"
 
 
+class SymptomsLevel(str, Enum):
+    RED = "RED"
+    YELLOW = "YELLOW"
+    GREEN = "GREEN"
+
+
 class CareRequest(BaseModel):
     citizen_id: constr(regex=r'^\d{13}$')
     first_name: str
@@ -78,7 +84,7 @@ class CareRequest(BaseModel):
     covid_test_date: datetime.date
     covid_test_confirmation_date: Optional[datetime.date]
     symptoms: List[Symptom]
-    symptoms_level: str
+    symptoms_level: SymptomsLevel
     other_symptoms: Optional[str]
     care_status: CareStatus = Field(..., description='''
         - NOT_SEEKING: ไม่ต้องการเข้ารับการรักษา
