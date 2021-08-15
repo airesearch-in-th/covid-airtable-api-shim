@@ -21,7 +21,7 @@ from airtable import (AIRTABLE_AUTH_HEADER, AIRTABLE_BASE_URL,
                       build_airtable_formula_chain, get_airtable_records,
                       get_citizen_id_matched_airtable_records)
 from models import (CareProvidedReport, CareRequest, CareRequestResponse,
-                    CareStatus, RequestStatus)
+                    CareStatus, RequestStatus, SymptomsLevel)
 from security import API_KEY_NAME, get_api_key
 from utils import hyphenate_citizen_id
 
@@ -83,6 +83,7 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
                         last_status_change_until: Optional[datetime.datetime] = Query(None),
                         status: Optional[List[RequestStatus]] = Query(None),
                         care_status: Optional[List[CareStatus]] = Query(None),
+                        symptoms_level: Optional[List[SymptomsLevel]] = Query(None),
                         api_key: APIKey = Depends(get_api_key)):
 
     filter_by_formulas = []
@@ -104,6 +105,10 @@ async def read_requests(last_status_change_since: Optional[datetime.datetime] = 
     if care_status and len(care_status) > 0:
         filter_by_formulas.append(build_airtable_formula_chain('OR', list(
             map(lambda care_status: f"{{Care Status}}=\"{care_status}\"", care_status))))
+
+    if symptoms_level and len(symptoms_level) > 0:
+        filter_by_formulas.append(build_airtable_formula_chain('OR', list(
+            map(lambda symptoms_level: f"{{Symptoms Level}}=\"{symptoms_level}\"", symptoms_level))))
 
     params = {
         'pageSize': 100,
